@@ -1,0 +1,7 @@
+/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/note-daemon.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/edit_cache.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/rebuild_cache.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/list_install_components.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/install.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/install/local.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/install/strip.dir
