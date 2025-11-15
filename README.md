@@ -16,7 +16,7 @@ Utilizes Netnotes binary object model
 
 Config 
 ---
-Location: ~/.netnotes/config (JSON or key=value format)
+Location: ~/.netnotes/config (key=value format)
 See: config-example
 
 Installation
