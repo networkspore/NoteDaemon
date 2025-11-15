@@ -4,37 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-# Run as a dedicated, unprivileged system user created during install
 User=netnotes
 Group=netnotes
 RuntimeDirectory=netnotes
 RuntimeDirectoryMode=0750
 
-# Update ExecStart to the installed path for your system/package
 ExecStart=/usr/local/bin/note-daemon
-Restart=on-failure
+Restart=no
 RestartSec=5s
-ExecStop=/bin/kill -TERM $MAINPID
-
-# Hardening flags — conservative defaults that preserve access to device
-# nodes owned by the 'netnotes' group. If stricter device access is needed,
-# use DeviceAllow= or ReadWritePaths= for the specific nodes instead of
-# running the service as root.
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-MemoryDenyWriteExecute=yes
-RestrictNamespaces=yes
-RestrictAddressFamilies=AF_UNIX
-SystemCallFilter=@system-service
-
-# If the daemon must access specific device nodes, allow them explicitly:
-# DeviceAllow=/dev/hidraw/* rwm
-# DeviceAllow=/dev/bus/usb/* rwm
-
-# Allow service runtime and data dirs (should be owned by netnotes)
-ReadWritePaths=/var/lib/netnotes /run/netnotes /var/run/netnotes
 
 # Journal logging
 StandardOutput=journal

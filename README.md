@@ -14,3 +14,4 @@ Features
 Config 
 ---
 Location: ~/.netnotes/config (JSON or key=value format)
+

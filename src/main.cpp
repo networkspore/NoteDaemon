@@ -6,6 +6,7 @@
 #include <signal.h> 
 #include <libusb-1.0/libusb.h>
 #include <sys/socket.h>
+#include <sys/syslog.h>
 #include <sys/un.h>
 #include <sys/stat.h>
 
@@ -17,18 +18,12 @@
 #include <fstream>
 #include <string>
 #include <map>
+#include <vector>
 #include "../include/utils.h"
 #include "../include/device_session.h"
-#include "../include/hid_parser.h"
 
-// Try to include nlohmann/json if available
-#ifdef HAVE_NLOHMANN_JSON
-#include <nlohmann/json.hpp>
-using json = nlohmann::json;
-#define JSON_AVAILABLE 1
-#else
-#define JSON_AVAILABLE 0
-#endif
+
+
 
 // Global state for signal handling
 std::atomic<bool> g_running{true};
@@ -49,44 +44,114 @@ public:
         std::string fix_suggestion;
     };
     
-    /**
-     * Check if daemon has necessary privileges
-     */
-    static CheckResult check_privileges() {
-        CheckResult result;
-        
-        // Check if running as root
+
+    static void log_privileges() {
+     
+        // 1. Root always OK
         if (getuid() == 0) {
-            result.passed = true;
-            result.message = "Running as root";
-            return result;
+            syslog(LOG_INFO, "[Warning] %s: %s", "Root", 
+                "Access with root user, is a security risk."
+                "\nSee README.md for secure setup");
+        }else{
+
+            // 2. CAP_SYS_ADMIN can also access USB
+            #ifdef _LINUX_CAPABILITY_VERSION_3
+            cap_t caps = cap_get_proc();
+            if (caps) {
+                cap_flag_value_t cap_value;
+                if (cap_get_flag(caps, CAP_SYS_ADMIN, CAP_EFFECTIVE, &cap_value) == 0) {
+                    if (cap_value == CAP_SET) {
+                        cap_free(caps);
+                        syslog(LOG_INFO, "[Warning] %s: %s", "CAP_SYS_ADMIN", 
+                            "Access with CAP_SYS_ADMIN, is a security risk."
+                            "\nSee README.md for secure setup");
+                    }
+                }
+                cap_free(caps);
+            }
+            #endif
         }
+      
+  
+    }
+
+     static bool can_access_any_usb_device() {
+        libusb_device **devs;
+        libusb_context* ctx = nullptr;
+        int rc = libusb_init(&ctx);
+        if (rc < 0) {
+            syslog(LOG_ERR, "[ERROR] %s: %s", "LIBUSB Context", libusb_error_name(rc));
+            return false;
+        }
+
+        ssize_t count = libusb_get_device_list(ctx, devs ? &devs : nullptr);
         
-        // Check for CAP_SYS_ADMIN (needed for USB operations)
-        #ifdef _LINUX_CAPABILITY_VERSION_3
-        cap_t caps = cap_get_proc();
-        if (caps) {
-            cap_flag_value_t cap_value;
-            if (cap_get_flag(caps, CAP_SYS_ADMIN, CAP_EFFECTIVE, &cap_value) == 0) {
-                if (cap_value == CAP_SET) {
-                    cap_free(caps);
-                    result.passed = true;
-                    result.message = "Has CAP_SYS_ADMIN capability";
-                    return result;
+        if (count < 0) {
+            syslog(LOG_INFO, "[ERROR] %s: %zd", "LIBUSB list",  count);
+            libusb_exit(ctx);
+            return false;
+        }
+
+        bool accessible = false;
+
+        libusb_device** list = nullptr;
+        ssize_t cnt = libusb_get_device_list(ctx, &list);
+        for (ssize_t i = 0; i < cnt; i++) {
+            libusb_device* dev = list[i];
+            libusb_device_handle* handle = nullptr;
+            rc = libusb_open(dev, &handle);
+            if (rc != 0) {
+                // Skip devices that cannot be opened (likely root hubs)
+                continue;
+            }
+            accessible = true;
+            // process accessible device
+            libusb_close(handle);
+        }
+        libusb_free_device_list(list, 1);
+
+        libusb_exit(ctx);
+
+        return accessible;
+    }
+
+
+    static bool can_access_usb_device(uint16_t vendor, uint16_t product) {
+        libusb_device **devs;
+        libusb_context *ctx = nullptr;
+
+        if (libusb_init(&ctx) != 0) return false;
+
+        ssize_t count = libusb_get_device_list(ctx, &devs);
+        if (count < 0) {
+            libusb_exit(ctx);
+            return false;
+        }
+
+        bool accessible = false;
+
+        for (ssize_t i = 0; i < count; i++) {
+            libusb_device *d = devs[i];
+            libusb_device_descriptor desc;
+
+            if (libusb_get_device_descriptor(d, &desc) == 0 &&
+                desc.idVendor == vendor &&
+                desc.idProduct == product)
+            {
+                libusb_device_handle* handle = nullptr;
+                int r = libusb_open(d, &handle);
+
+                if (r == 0) {
+                    accessible = true;
+                    libusb_close(handle);
+                    break;
                 }
             }
-            cap_free(caps);
         }
-        #endif
-        
-        result.passed = false;
-        result.message = "Insufficient privileges for USB operations";
-        result.fix_suggestion = 
-            "Run as root: sudo ./notedaemon\n"
-            "OR setup udev rules: /etc/udev/rules.d/99-netnotes.rules\n"
-            "  SUBSYSTEM==\"usb\", ATTR{idVendor}=\"*\", MODE=\"0666\", GROUP=\"netnotes\"";
-        
-        return result;
+
+        libusb_free_device_list(devs, 1);
+        libusb_exit(ctx);
+        return accessible;
     }
     
     /**
@@ -144,41 +209,63 @@ public:
      */
     static CheckResult check_libusb() {
         CheckResult result;
-        
+
         libusb_context* ctx = nullptr;
         int rc = libusb_init(&ctx);
-        
+
         if (rc < 0) {
             result.passed = false;
-            result.message = "libusb init failed: " + std::string(libusb_error_name(rc));
-            result.fix_suggestion = "Install libusb-1.0: apt install libusb-1.0-0-dev";
+            // Distinguish missing library vs init error
+            if (rc == LIBUSB_ERROR_NO_MEM) {
+                result.message = "libusb init failed: out of memory";
+            } else if (rc == LIBUSB_ERROR_ACCESS) {
+                result.message = "libusb init failed: insufficient privileges or udev rules";
+            } else if (rc == LIBUSB_ERROR_NO_DEVICE) {
+                result.message = "libusb init succeeded, but no USB devices found";
+                result.passed = true;  // still OK at startup
+            } else {
+                result.message = std::string("libusb init failed: ") + libusb_error_name(rc);
+            }
+
+            result.fix_suggestion = "Ensure libusb-1.0 runtime is installed:\n"
+                                    "Ubuntu/Debian: sudo apt install libusb-1.0-0\n"
+                                    "Fedora: sudo dnf install libusbx\n"
+                                    "Arch: sudo pacman -S libusb";
+
+            if (ctx) libusb_exit(ctx);
             return result;
         }
-        
-        libusb_exit(ctx);
+
         result.passed = true;
-        result.message = "libusb OK";
+        result.message = "initialized";
+        libusb_exit(ctx);
         return result;
     }
-    
+        
     /**
      * Run all checks and report
      */
-    static bool validate_all(const std::string& socket_dir, 
-                            const std::string& socket_group) {
+    static bool validate_all(const std::string& socket_dir, const std::string& socket_group) {
         bool all_passed = true;
         
         syslog(LOG_INFO, "=== System Requirements Check ===");
         
-        // Check privileges
-        auto priv_result = check_privileges();
-        log_check_result("Privileges", priv_result);
-        all_passed &= priv_result.passed;
-        
+     
         // Check libusb
         auto libusb_result = check_libusb();
         log_check_result("libusb", libusb_result);
         all_passed &= libusb_result.passed;
+
+        // Log privileges only
+        log_privileges();
+
+        if(!all_passed){
+            if(can_access_any_usb_device()) {
+                syslog(LOG_INFO, "[OK] %s: %s", "USB ACCESS", "passed");
+            }else{
+                syslog(LOG_ALERT, "[CRITICAL] %s: %s", "USB ACCESS", "failed. Unable to open any USB device");
+            }
+        }
         
         // Check socket group (warning only)
         auto group_result = check_socket_group(socket_group);
@@ -280,6 +367,7 @@ private:
 /**
  * Daemon configuration - ONLY configurable settings
  */
+
 class DaemonConfig {
 public:
     // Socket configuration
@@ -296,7 +384,7 @@ public:
     int usb_timeout_ms = 100;
     int usb_discovery_interval_ms = 1000;
     bool usb_auto_detach_kernel = true;  // REQUIRED for claiming
-    
+ 
     // Security
     bool require_group_membership = true;
     std::vector<std::string> allowed_groups;
@@ -347,15 +435,8 @@ public:
         
         syslog(LOG_INFO, "Loading config from %s", config_path.c_str());
         
-#if JSON_AVAILABLE
-        if (try_load_json(config_path)) {
-            syslog(LOG_INFO, "Configuration loaded from JSON");
-            validate_config();
-            return true;
-        }
-#endif
         
-        if (try_load_simple(config_path)) {
+        if (try_load_config(config_path)) {
             syslog(LOG_INFO, "Configuration loaded from key=value format");
             validate_config();
             return true;
@@ -365,140 +446,8 @@ public:
         return false;
     }
     
-#if JSON_AVAILABLE
-    bool try_load_json(const std::string& path) {
-        try {
-            std::ifstream file(path);
-            json config = json::parse(file);
-            
-            // Socket
-            if (config.contains("socket")) {
-                auto sock = config["socket"];
-                if (sock.contains("path")) socket_path = sock["path"];
-                if (sock.contains("dir")) socket_dir = sock["dir"];
-                if (sock.contains("group")) socket_group = sock["group"];
-                if (sock.contains("permissions")) {
-                    socket_permissions = static_cast<mode_t>(sock["permissions"].get<int>());
-                }
-            }
-            
-            // Logging
-            if (config.contains("logging")) {
-                auto log = config["logging"];
-                if (log.contains("level")) {
-                    std::string level = log["level"];
-                    if (level == "debug") log_level = LOG_DEBUG;
-                    else if (level == "info") log_level = LOG_INFO;
-                    else if (level == "warning") log_level = LOG_WARNING;
-                    else if (level == "error") log_level = LOG_ERR;
-                }
-                if (log.contains("stderr")) log_to_stderr = log["stderr"];
-            }
-            
-            // USB
-            if (config.contains("usb")) {
-                auto usb = config["usb"];
-                if (usb.contains("timeout_ms")) usb_timeout_ms = usb["timeout_ms"];
-                if (usb.contains("discovery_interval_ms")) {
-                    usb_discovery_interval_ms = usb["discovery_interval_ms"];
-                }
-                if (usb.contains("auto_detach_kernel")) {
-                    usb_auto_detach_kernel = usb["auto_detach_kernel"];
-                }
-            }
-            
-            // Security
-            if (config.contains("security")) {
-                auto sec = config["security"];
-                if (sec.contains("require_group")) {
-                    require_group_membership = sec["require_group"];
-                }
-                if (sec.contains("allow_root_bypass")) {
-                    allow_root_bypass = sec["allow_root_bypass"];
-                }
-                if (sec.contains("allowed_groups") && sec["allowed_groups"].is_array()) {
-                    allowed_groups.clear();
-                    for (const auto& grp : sec["allowed_groups"]) {
-                        allowed_groups.push_back(grp);
-                    }
-                }
-            }
-            
-            // Performance
-            if (config.contains("performance")) {
-                auto perf = config["performance"];
-                if (perf.contains("max_clients")) max_clients = perf["max_clients"];
-                if (perf.contains("max_queue_size")) max_queue_size = perf["max_queue_size"];
-                if (perf.contains("polling_interval_us")) {
-                    polling_interval_us = perf["polling_interval_us"];
-                }
-                if (perf.contains("thread_pool_size")) {
-                    thread_pool_size = perf["thread_pool_size"];
-                }
-            }
-            
-            // Heartbeat
-            if (config.contains("heartbeat")) {
-                auto hb = config["heartbeat"];
-                if (hb.contains("enabled")) heartbeat_enabled = hb["enabled"];
-                if (hb.contains("interval_ms")) heartbeat_interval_ms = hb["interval_ms"];
-                if (hb.contains("timeout_ms")) heartbeat_timeout_ms = hb["timeout_ms"];
-                if (hb.contains("max_missed")) heartbeat_max_missed = hb["max_missed"];
-            }
-            
-            // Backpressure
-            if (config.contains("backpressure")) {
-                auto bp = config["backpressure"];
-                if (bp.contains("max_unacknowledged")) {
-                    backpressure_max_unacked = bp["max_unacknowledged"];
-                }
-                if (bp.contains("resume_threshold")) {
-                    backpressure_resume_threshold = bp["resume_threshold"];
-                }
-                if (bp.contains("stale_timeout_ms")) {
-                    backpressure_stale_timeout_ms = bp["stale_timeout_ms"];
-                }
-            }
-            
-            // Monitoring
-            if (config.contains("monitoring")) {
-                auto mon = config["monitoring"];
-                if (mon.contains("stats_enabled")) stats_enabled = mon["stats_enabled"];
-                if (mon.contains("stats_interval_ms")) {
-                    stats_interval_ms = mon["stats_interval_ms"];
-                }
-                if (mon.contains("event_logging")) event_logging = mon["event_logging"];
-            }
-            
-            // Advanced
-            if (config.contains("advanced")) {
-                auto adv = config["advanced"];
-                if (adv.contains("buffer_size")) buffer_size = adv["buffer_size"];
-                if (adv.contains("event_batch_size")) {
-                    event_batch_size = adv["event_batch_size"];
-                }
-                if (adv.contains("use_epoll")) use_epoll = adv["use_epoll"];
-            }
-            
-            // Debug
-            if (config.contains("debug")) {
-                auto dbg = config["debug"];
-                if (dbg.contains("dump_packets")) debug_dump_packets = dbg["dump_packets"];
-                if (dbg.contains("simulate_latency_ms")) {
-                    debug_simulate_latency_ms = dbg["simulate_latency_ms"];
-                }
-            }
-            
-            return true;
-            
-        } catch (const std::exception& e) {
-            syslog(LOG_WARNING, "JSON parse error: %s", e.what());
-            return false;
-        }
-    }
-#endif
     
-    bool try_load_simple(const std::string& path) {
+    bool try_load_config(const std::string& path) {
         SimpleConfigParser parser;
         if (!parser.parse_file(path)) {
             return false;
@@ -525,7 +474,7 @@ public:
                                                    usb_discovery_interval_ms);
         usb_auto_detach_kernel = parser.get_bool("usb.auto_detach_kernel", 
                                                 usb_auto_detach_kernel);
-        
+
         // Security
         require_group_membership = parser.get_bool("security.require_group", 
                                                    require_group_membership);
@@ -907,7 +856,7 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "  -h, --help     Show this help message\n");
         fprintf(stderr, "  -c, --check    Check system requirements and exit\n\n");
         fprintf(stderr, "Configuration:\n");
-        fprintf(stderr, "  Config file: ~/.netnotes/config (JSON or key=value)\n");
+        fprintf(stderr, "  Config file: ~/.netnotes/config (key=value)\n");
         fprintf(stderr, "  Socket: /run/netnotes/notedaemon.sock\n\n");
         fprintf(stderr, "Requirements:\n");
         fprintf(stderr, "  - Root privileges OR proper udev rules\n");

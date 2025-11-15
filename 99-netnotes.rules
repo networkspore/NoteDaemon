@@ -1,17 +1,9 @@
 # /etc/udev/rules.d/99-netnotes.rules
-# Provide controlled access to HID/USB devices for the 'netnotes' group.
-# This rule is intentionally conservative: it matches HID interfaces (class 0x03)
-# and raw hidraw devices. Adjust vendor/product or serial selectors below if you
-# want to limit access to specific devices.
 
-# USB HID Interfaces (Boot Protocol keyboards/mice)
-SUBSYSTEM=="usb", ATTRS{bInterfaceClass}=="03", MODE="0660", GROUP="netnotes"
+SUBSYSTEM=="usb", KERNEL=="usb[0-9]*", MODE="0660", GROUP="root"
 
-# Raw HID devices (hidraw nodes)
-SUBSYSTEM=="hidraw", KERNEL=="hidraw*", MODE="0660", GROUP="netnotes"
-
-# Optional: restrict by vendor/product or serial (example)
-# SUBSYSTEM=="usb", ATTR{idVendor}=="abcd", ATTR{idProduct}=="1234", MODE="0660", GROUP="netnotes"
+# Raw HID devices for netnotes user (your actual devices)
+SUBSYSTEM=="hidraw", GROUP="netnotes", MODE="0660"
 
 # Notes / Installation
 # 1. Create a dedicated system group and user for the daemon (if not present):
