@@ -23,6 +23,7 @@ constexpr uint8_t EVENT_MOUSE_DRAG = 10;
 constexpr uint8_t EVENT_MOUSE_DRAG_END = 11;
 constexpr uint8_t EVENT_MOUSE_MOVE_ABSOLUTE = 12;
 
+
 // Keyboard events (15-19)
 constexpr uint8_t EVENT_KEY_DOWN = 15;
 constexpr uint8_t EVENT_KEY_UP = 16;
@@ -39,6 +40,14 @@ constexpr uint8_t EVENT_WINDOW_RESIZE = 52;
 constexpr uint8_t EVENT_WINDOW_MOVE = 53;
 constexpr uint8_t EVENT_WINDOW_CLOSE = 54;
 constexpr uint8_t EVENT_FRAMEBUFFER_RESIZE = 55;
+
+constexpr uint8_t EVENT_RAW_HID        = 60;
+
+constexpr uint8_t TYPE_ENCRYPTION_OFFER   = 225;
+constexpr uint8_t TYPE_ENCRYPTION_ACCEPT  = 226;
+constexpr uint8_t TYPE_ENCRYPTION_READY   = 227;
+constexpr uint8_t TYPE_ENCRYPTED          = 228;
+constexpr uint8_t TYPE_ENCRYPTION_DECLINE = 229;
 
 // State change events (242-247)
 constexpr uint8_t EVENT_RELEASE = 242;
@@ -58,6 +67,11 @@ constexpr uint8_t TYPE_HELLO = 253;        // identity bootstrap
 constexpr uint8_t TYPE_CMD = 254;
 constexpr uint8_t TYPE_SHUTDOWN = 255;
 
+inline bool requires_encryption(uint8_t type) {
+    // Only event messages (0x30+) should be encrypted
+    // Protocol/control messages are sent in plaintext
+    return type >= 0x30;
+}
 /**
  * State flags for input events
  * Matches Java EventBytes.StateFlags

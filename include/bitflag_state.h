@@ -12,6 +12,7 @@
 #include <vector>
 #include <functional>
 #include <mutex>
+#include <condition_variable>
 #include "capability_registry.h"
 
 
@@ -485,6 +486,9 @@ struct DeviceState {
     std::atomic<uint64_t> events_sent{0};
     std::atomic<uint64_t> events_dropped{0};
     uint64_t last_event_time = 0;
+    // Queueing primitives for streaming/backpressure
+    std::mutex queue_mutex;
+    std::condition_variable queue_cv;
     
     DeviceState(const std::string& id, int32_t sid, pid_t pid,
                const std::string& dev_type, uint64_t avail_caps)

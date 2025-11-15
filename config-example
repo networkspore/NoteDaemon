@@ -1,0 +1,109 @@
+{
+  "_comment": "Netnotes NoteDaemon Configuration",
+  
+  "socket": {
+    "_comment": "Unix domain socket settings",
+    "path": "/run/netnotes/notedaemon.sock",
+    "dir": "/run/netnotes",
+    "group": "netnotes",
+    "permissions": 432,
+    "_permissions_note": "432 decimal = 0660 octal = rw-rw----"
+  },
+
+  "logging": {
+    "_comment": "Syslog configuration",
+    "level": "info",
+    "_levels": ["debug", "info", "warning", "error"],
+    "stderr": false,
+    "_stderr_note": "Also log to stderr (useful for systemd/debugging)"
+  },
+
+  "usb": {
+    "_comment": "USB/libusb daemon settings (NOT protocol capabilities)",
+    "timeout_ms": 100,
+    "_timeout_note": "USB transfer timeout for libusb operations",
+    "discovery_interval_ms": 1000,
+    "_discovery_note": "How often to scan for new USB devices",
+    "auto_detach_kernel": true,
+    "_detach_note": "REQUIRED for claiming - detach kernel drivers automatically"
+  },
+
+  "security": {
+    "_comment": "Access control for daemon socket",
+    "require_group": true,
+    "_require_note": "Clients must be in socket.group or allowed_groups",
+    "allowed_groups": ["netnotes", "input"],
+    "_groups_note": "Additional groups that can connect",
+    "allow_root_bypass": true,
+    "_root_note": "Root can connect regardless of group membership"
+  },
+
+  "performance": {
+    "_comment": "Resource limits and tuning",
+    "max_clients": 10,
+    "_clients_note": "Maximum concurrent client connections",
+    "max_queue_size": 1000,
+    "_queue_note": "Max queued events per device before backpressure",
+    "polling_interval_us": 1000,
+    "_polling_note": "USB interrupt polling interval (microseconds)",
+    "thread_pool_size": 4,
+    "_threads_note": "Worker threads for event processing"
+  },
+
+  "heartbeat": {
+    "_comment": "Client health monitoring",
+    "enabled": true,
+    "interval_ms": 5000,
+    "_interval_note": "Ping interval",
+    "timeout_ms": 15000,
+    "_timeout_note": "Disconnect client after timeout",
+    "max_missed": 3,
+    "_missed_note": "Max missed pongs before disconnect"
+  },
+
+  "backpressure": {
+    "_comment": "Flow control when clients can't keep up",
+    "max_unacknowledged": 100,
+    "_unacked_note": "Pause sending after N unacknowledged messages",
+    "resume_threshold": 50,
+    "_resume_note": "Resume when unacked drops below this",
+    "stale_timeout_ms": 30000,
+    "_stale_note": "Consider connection stale after inactivity"
+  },
+
+  "monitoring": {
+    "_comment": "Diagnostics and statistics",
+    "stats_enabled": true,
+    "stats_interval_ms": 60000,
+    "_stats_note": "Log performance stats every N ms",
+    "event_logging": false,
+    "_event_note": "Log all events (VERY verbose, debug only)"
+  },
+
+  "advanced": {
+    "_comment": "Expert settings - don't change unless needed",
+    "buffer_size": 8192,
+    "_buffer_note": "Socket buffer size in bytes",
+    "event_batch_size": 10,
+    "_batch_note": "Send events in batches of N",
+    "use_epoll": true,
+    "_epoll_note": "Use epoll for I/O multiplexing (Linux only)"
+  },
+
+  "debug": {
+    "_comment": "Debugging - disable in production",
+    "dump_packets": false,
+    "_dump_note": "Hex dump all packets (very verbose)",
+    "simulate_latency_ms": 0,
+    "_latency_note": "Artificial delay for testing"
+  },
+
+
+  "_linux_requirements": {
+    "_note": "These are REQUIREMENTS, not optional config:",
+    "_root_access": "Daemon MUST run as root OR have proper udev rules",
+    "_udev_rules": "Alternative to root: /etc/udev/rules.d/99-netnotes.rules",
+    "_kernel_detach": "REQUIRED for exclusive device access",
+    "_socket_permissions": "Meaningful, but still need group membership setup"
+  }
+}

@@ -61,7 +61,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
   if(EXISTS "$ENV{DESTDIR}/usr/local/bin/note-daemon" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}/usr/local/bin/note-daemon")
     if(CMAKE_INSTALL_DO_STRIP)
-      execute_process(CMD "/usr/bin/strip" "$ENV{DESTDIR}/usr/local/bin/note-daemon")
+      execute_process(COMMAND "/usr/bin/strip" "$ENV{DESTDIR}/usr/local/bin/note-daemon")
     endif()
   endif()
 endif()

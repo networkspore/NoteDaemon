@@ -286,29 +286,12 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: \
  /usr/include/x86_64-linux-gnu/bits/semaphore.h \
  /usr/include/c++/13/vector /usr/include/c++/13/bits/stl_vector.h \
  /usr/include/c++/13/bits/stl_bvector.h \
- /usr/include/c++/13/bits/vector.tcc \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/bitflag_state.h \
- /usr/include/c++/13/functional /usr/include/c++/13/bits/std_function.h \
- /usr/include/c++/13/unordered_map \
- /usr/include/c++/13/bits/unordered_map.h \
- /usr/include/c++/13/bits/hashtable.h \
- /usr/include/c++/13/bits/hashtable_policy.h \
- /usr/include/c++/13/bits/enable_special_members.h \
- /usr/include/c++/13/array /usr/include/c++/13/bits/stl_algo.h \
+ /usr/include/c++/13/bits/vector.tcc /usr/include/c++/13/chrono \
+ /usr/include/c++/13/sstream /usr/include/c++/13/bits/sstream.tcc \
+ /usr/include/c++/13/bits/stl_algo.h \
  /usr/include/c++/13/bits/algorithmfwd.h \
  /usr/include/c++/13/bits/stl_heap.h \
- /usr/include/c++/13/bits/uniform_int_dist.h /usr/include/c++/13/mutex \
- /usr/include/c++/13/bits/unique_lock.h \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/capability_registry.h \
- /usr/include/c++/13/set /usr/include/c++/13/bits/stl_set.h \
- /usr/include/c++/13/bits/stl_multiset.h \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/note_messaging.h \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/notebytes.h \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/event_bytes.h \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/input_packet.h \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/atomic_sequence.h \
- /usr/include/c++/13/chrono /usr/include/c++/13/sstream \
- /usr/include/c++/13/bits/sstream.tcc \
+ /usr/include/c++/13/bits/uniform_int_dist.h \
  /usr/include/c++/13/bits/chrono_io.h /usr/include/c++/13/iomanip \
  /usr/include/c++/13/locale \
  /usr/include/c++/13/bits/locale_facets_nonio.h \
@@ -317,6 +300,55 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: \
  /usr/include/libintl.h /usr/include/c++/13/bits/locale_facets_nonio.tcc \
  /usr/include/c++/13/bits/locale_conv.h \
  /usr/include/c++/13/bits/quoted_string.h /usr/include/c++/13/format \
- /usr/include/c++/13/charconv /usr/include/c++/13/optional \
+ /usr/include/c++/13/array /usr/include/c++/13/charconv \
+ /usr/include/c++/13/optional \
+ /usr/include/c++/13/bits/enable_special_members.h \
  /usr/include/c++/13/span /usr/include/c++/13/variant \
- /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/utils.h
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/bitflag_state.h \
+ /usr/include/c++/13/functional /usr/include/c++/13/bits/std_function.h \
+ /usr/include/c++/13/unordered_map \
+ /usr/include/c++/13/bits/unordered_map.h \
+ /usr/include/c++/13/bits/hashtable.h \
+ /usr/include/c++/13/bits/hashtable_policy.h /usr/include/c++/13/mutex \
+ /usr/include/c++/13/bits/unique_lock.h \
+ /usr/include/c++/13/condition_variable \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/capability_registry.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/note_messaging.h \
+ /usr/include/c++/13/set /usr/include/c++/13/bits/stl_set.h \
+ /usr/include/c++/13/bits/stl_multiset.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/notebytes.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/event_bytes.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/input_packet.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/atomic_sequence.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/utils.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/hid_parser.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/encryption_protocol.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/encryption.h \
+ /usr/include/openssl/dh.h /usr/include/openssl/macros.h \
+ /usr/include/x86_64-linux-gnu/openssl/opensslconf.h \
+ /usr/include/x86_64-linux-gnu/openssl/configuration.h \
+ /usr/include/openssl/opensslv.h /usr/include/openssl/types.h \
+ /usr/include/openssl/e_os2.h /usr/include/openssl/safestack.h \
+ /usr/include/openssl/stack.h /usr/include/c++/13/stdlib.h \
+ /usr/include/openssl/bio.h /usr/include/openssl/crypto.h \
+ /usr/include/openssl/cryptoerr.h /usr/include/openssl/symhacks.h \
+ /usr/include/openssl/cryptoerr_legacy.h /usr/include/openssl/core.h \
+ /usr/include/openssl/bioerr.h /usr/include/openssl/asn1.h \
+ /usr/include/openssl/asn1err.h /usr/include/openssl/bn.h \
+ /usr/include/openssl/bnerr.h /usr/include/openssl/dherr.h \
+ /usr/include/openssl/evp.h /usr/include/openssl/core_dispatch.h \
+ /usr/include/openssl/evperr.h /usr/include/openssl/params.h \
+ /usr/include/openssl/objects.h /usr/include/openssl/obj_mac.h \
+ /usr/include/openssl/objectserr.h /usr/include/openssl/rand.h \
+ /usr/include/openssl/randerr.h /usr/include/openssl/pem.h \
+ /usr/include/openssl/x509.h /usr/include/openssl/buffer.h \
+ /usr/include/openssl/buffererr.h /usr/include/openssl/ec.h \
+ /usr/include/openssl/ecerr.h /usr/include/openssl/rsa.h \
+ /usr/include/openssl/rsaerr.h /usr/include/openssl/dsa.h \
+ /usr/include/openssl/dsaerr.h /usr/include/openssl/sha.h \
+ /usr/include/openssl/x509err.h /usr/include/openssl/x509_vfy.h \
+ /usr/include/openssl/lhash.h /usr/include/openssl/pkcs7.h \
+ /usr/include/openssl/pkcs7err.h /usr/include/openssl/http.h \
+ /usr/include/openssl/conf.h /usr/include/openssl/conferr.h \
+ /usr/include/openssl/conftypes.h /usr/include/openssl/pemerr.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/hid_parser.h

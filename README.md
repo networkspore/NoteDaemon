@@ -11,7 +11,6 @@ Features
     -UID Filtering: Optional filtering by user ID
     -Secure Buffer Handling: Automatic zeroing of sensitive data
 
-Config
---
-    Path: ~/.netnotes/config
-    Format: json or ini
+Config 
+---
+Location: ~/.netnotes/config (JSON or key=value format)
