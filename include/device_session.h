@@ -23,6 +23,8 @@ extern std::atomic<bool> g_running;
 #include "capability_registry.h"
 #include "note_messaging.h"
 #include "notebytes.h"
+#include "notebytes_writer.h"
+#include "notebytes_reader.h"
 #include "event_bytes.h"
 #include "input_packet.h"
 #include "hid_parser.h"
@@ -436,7 +438,10 @@ private:
         }
         response.add(NoteMessaging::Keys::ITEMS, devices_array.as_value());
         
-        send_message(response);
+
+        NoteBytes::Writer writer(client_fd, false);
+        (void) writer.write(response);
+        (void) writer.flush();
         
         syslog(LOG_INFO, "Sent device list: %zu devices", available_devices.size());
     }
@@ -834,17 +839,21 @@ private:
 
                         bool encrypt = device_state->state.has_flag(DeviceFlags::ENCRYPTION_ENABLED);
 
-                        auto event_packet = event_obj.serialize_with_header();
+                        
                         if (message_wrapper_) {
+                            auto event_packet = event_obj.serialize_with_header();
                             sent = message_wrapper_->send_routed_serialized(client_fd, device_state->source_id,
                                                                             event_packet, encrypt);
                         } else {
-                            NoteBytes::Value sid_val(device_state->source_id);
-                            std::vector<uint8_t> packet(sid_val.serialized_size() + event_packet.size());
-                            size_t off = 0;
-                            sid_val.write_to(packet.data(), off);
-                            memcpy(packet.data() + off, event_packet.data(), event_packet.size());
-                            sent = InputPacket::write_packet(client_fd, packet);
+                            NoteBytes::Writer writer(client_fd, false);
+                            (void) writer.write(NoteBytes::Value(device_state->source_id));
+                            (void) writer.write(event_obj);
+                            try {
+                                (void) writer.flush();
+                                sent = true;
+                            } catch (const std::exception& e) {
+                                sent = false;
+                            }
                         }
 
                         if (sent) {
@@ -917,8 +926,9 @@ private:
             // For control (non-routed) messages use send_control_message
             message_wrapper_->send_control_message(client_fd, msg);
         } else {
-            auto packet = msg.serialize_with_header();
-            InputPacket::write_packet(client_fd, packet);
+            NoteBytes::Writer writer(client_fd, false);
+            (void) writer.write(msg);
+            (void) writer.flush();
         }
     }
     

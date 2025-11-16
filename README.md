@@ -12,16 +12,29 @@ Features
 Protocol
 ---
 Utilizes Netnotes binary object model
-See: NoteBytes Wire Protocol Format
+[NoteBytes Wire Protocol Format](protocol_wire_format.md)
 
 Config 
 ---
-Location: ~/.netnotes/config (key=value format)
-See: config-example
+Place configfile in your home directory under: ~/.netnotes/config (key=value format)
+[config-example](config-example)
 
 Installation
 ----
-See: setup-netnotes.sh
+Requires daemon and client to be part of the same group, and have adequate priveleges 
+to access:
+# /dev/bus/usb/*/*
+# /dev/hidraw*
+A recommended setup is to create a udev rule for the USB ports, and create dedicated user 
+and group for the application.
 
-Uninstall
-see: uninstall-netnotes.sh
+Quick Setup:
+[Builder bash](build.sh)
+[autorun service](note-daemon.service)
+[USB rules](99-netnotes.rules)
+[configuration bash](setup-netnotes.sh)
+
+Download source and make bash files executable:
+# chmod +x (bash file).sh
+
+[Unintall](uninstall-netnotes.sh)

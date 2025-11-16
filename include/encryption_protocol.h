@@ -7,6 +7,7 @@
 #include "encryption.h"
 #include "note_messaging.h"
 #include "notebytes.h"
+#include "notebytes_writer.h"
 #include "event_bytes.h"
 #include "input_packet.h"
 #include <memory>
@@ -275,24 +276,26 @@ public:
      * Format: [OBJECT type][length][pairs...]
      */
     bool send_control_message(int client_fd, const NoteBytes::Object& msg) {
-        auto packet = msg.serialize_with_header();
-        return InputPacket::write_packet(client_fd, packet);
+        NoteBytes::Writer writer(client_fd, false);
+        (void) writer.write(msg);
+        (void) writer.flush();
+        return true;
     }
     
     /**
      * Send routed device message (optionally encrypted)
-     * Format: [INTEGER type][0x00000004][sourceId][OBJECT or ENCRYPTED][length][data...]
+     * Format: [INTEGER type][0x00000004][sourceId bytes][OBJECT or ENCRYPTED][length][data...]
      */
     bool send_routed_message(int client_fd, int32_t source_id,
                             const NoteBytes::Object& event,
                             bool encrypt = false) {
         std::vector<uint8_t> packet;
         
-        // 1. Write sourceId prefix
-        NoteBytes::Value sid(source_id);
-        size_t offset = 0;
-        packet.resize(sid.serialized_size());
-        sid.write_to(packet.data(), offset);
+        NoteBytes::Writer writer(client_fd, false);
+        
+        // 1. Write sourceId as INTEGER with full metadata
+        // [0x03][0x00000004][4 bytes of sourceId]
+        (void) writer.write(NoteBytes::Value(source_id));
         
         // 2. Write event (encrypted or not)
         if (encrypt && handshake_.is_active()) {
@@ -302,69 +305,62 @@ public:
             // Encrypt entire packet (type + length + data)
             auto ciphertext = handshake_.encrypt(event_packet);
             
-            // Write as ENCRYPTED type
-            size_t base = packet.size();
-            packet.resize(base + 5 + ciphertext.size());
-            packet[base] = NoteBytes::Type::ENCRYPTED;
-            write_uint32_be(packet.data() + base + 1, ciphertext.size());
-            memcpy(packet.data() + base + 5, ciphertext.data(), ciphertext.size());
+            // Write as ENCRYPTED type with metadata
+            // [0x1A][length][encrypted bytes]
+            NoteBytes::Value encrypted_val(ciphertext, NoteBytes::Type::ENCRYPTED);
+            (void) writer.write(encrypted_val);
+            
+            // Zero out ciphertext
+            std::fill(ciphertext.begin(), ciphertext.end(), 0);
         } else {
-            // Write as normal OBJECT
-            auto event_packet = event.serialize_with_header();
-            packet.insert(packet.end(), event_packet.begin(), event_packet.end());
+
+            // Write as normal OBJECT with metadata
+            (void) writer.write(event);
         }
         
-        return InputPacket::write_packet(client_fd, packet);
+        try {
+            (void) writer.flush();
+            return true;
+        } catch (const std::exception& e) {
+            syslog(LOG_ERR, "Failed to send routed message: %s", e.what());
+            return false;
+        }
     }
 
     /**
-     * Send a pre-serialized event packet (with 5-byte NoteBytes header) as a routed message.
-     * This avoids re-parsing/re-serializing when the caller already has the packet bytes.
-     */
+    * Send a pre-serialized event packet (with 5-byte NoteBytes header) as a routed message.
+    * Used when we already have a serialized packet from HID parser.
+    */
     bool send_routed_serialized(int client_fd, int32_t source_id,
                                 const std::vector<uint8_t>& event_packet,
                                 bool encrypt = false) {
         // Write sourceId prefix first (no extra copy)
-        NoteBytes::Value sid(source_id);
-        uint8_t sid_buf[64]; // sufficient for one integer value
-        size_t sid_off = 0;
-        sid.write_to(sid_buf, sid_off);
-
-        // Write sid
-        ssize_t w = ::write(client_fd, sid_buf, sid_off);
-        if (w != static_cast<ssize_t>(sid_off)) {
-            return false;
-        }
+        NoteBytes::Writer writer(client_fd, false);
+        // Write sourceId
+        (void) writer.write(NoteBytes::Value(source_id));
 
         if (encrypt && handshake_.is_active()) {
             // Encrypt entire event packet (including its header)
             auto ciphertext = handshake_.encrypt(event_packet);
 
-            // Build encrypted header
-            uint8_t header[5];
-            header[0] = NoteBytes::Type::ENCRYPTED;
-            write_uint32_be(header + 1, static_cast<uint32_t>(ciphertext.size()));
-
-            if (::write(client_fd, header, 5) != 5) {
-                // zero out ciphertext before returning
-                std::fill(ciphertext.begin(), ciphertext.end(), 0);
-                return false;
-            }
-
-            if (::write(client_fd, ciphertext.data(), ciphertext.size()) != static_cast<ssize_t>(ciphertext.size())) {
-                std::fill(ciphertext.begin(), ciphertext.end(), 0);
-                return false;
-            }
+            // Write as ENCRYPTED
+            NoteBytes::Value encrypted_val(ciphertext, NoteBytes::Type::ENCRYPTED);
+            (void) writer.write(encrypted_val);
 
             // Zero out ciphertext buffer
             std::fill(ciphertext.begin(), ciphertext.end(), 0);
-            return true;
+
         } else {
-            // Write the pre-serialized object packet directly
-            if (::write(client_fd, event_packet.data(), event_packet.size()) != static_cast<ssize_t>(event_packet.size())) {
-                return false;
-            }
+            // Write pre-serialized packet as raw (it already has metadata)
+            (void) writer.write_raw(event_packet);
+        }
+
+        try {
+            (void) writer.flush();
             return true;
+        } catch (const std::exception& e) {
+            syslog(LOG_ERR, "Failed to send routed serialized: %s", e.what());
+            return false;
         }
     }
     
