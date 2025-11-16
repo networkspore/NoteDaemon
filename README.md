@@ -31,10 +31,14 @@ A recommended setup is to create a udev rule for the USB ports, and create dedic
 and group for the application.
 
 Quick Setup:
-[Builder bash](build.sh)
-[autorun service](note-daemon.service)
-[USB rules](99-netnotes.rules)
+[Builder bash](build.sh) 
+
+[autorun service](note-daemon.service) 
+
+[USB rules](99-netnotes.rules) 
+
 [configuration bash](setup-netnotes.sh)
+
 
 Download source and make bash files executable:
 ```
