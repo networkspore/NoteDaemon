@@ -30,7 +30,8 @@ to access:
 A recommended setup is to create a udev rule for the USB ports, and create dedicated user 
 and group for the application.
 
-Quick Setup:
+Quick Setup: 
+
 [Builder bash](build.sh) 
 
 [autorun service](note-daemon.service) 
