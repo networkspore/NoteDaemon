@@ -19,7 +19,8 @@
 // Global running flag declared in main.cpp
 extern std::atomic<bool> g_running;
 
-#include "bitflag_state.h"
+#include "bitflag_state_bigint.h"
+#include "state.h"
 #include "capability_registry.h"
 #include "note_messaging.h"
 #include "notebytes.h"
@@ -54,8 +55,8 @@ struct USBDeviceDescriptor {
     int interrupt_endpoint = 0;
     
     std::string device_type;
-    uint64_t available_capabilities;
-    uint64_t default_mode;
+    cpp_int available_capabilities;
+    int default_mode = State::DeviceFlags::RAW_MODE;
     
     bool available;
     bool kernel_driver_attached;
@@ -65,7 +66,7 @@ struct USBDeviceDescriptor {
     USBDeviceDescriptor() 
         : vendor_id(0), product_id(0), device_class(0), device_subclass(0),
           device_protocol(0), bus_number(0), device_address(0),
-          available_capabilities(0), default_mode(0),
+          available_capabilities(0), default_mode(State::DeviceFlags::RAW_MODE),
           available(false), kernel_driver_attached(false) {}
     
     void detect_capabilities(libusb_device* device, bool encryption_supported) {
@@ -85,11 +86,13 @@ struct USBDeviceDescriptor {
         
         // Add encryption capability if supported by daemon
         if (encryption_supported) {
-            available_capabilities |= Bits::ENCRYPTION_SUPPORTED;
+            bit_set(available_capabilities, Bits::ENCRYPTION_SUPPORTED);
         }
+        std::string caps_str = Capabilities::Names::format_capabilities(available_capabilities);
         
-        syslog(LOG_INFO, "Device '%s' detected as '%s' with capabilities 0x%lx",
-               product.c_str(), device_type.c_str(), available_capabilities);
+        syslog(LOG_INFO,
+            "Device '%s' detected as '%s' with capabilities: %s",
+            product.c_str(), device_type.c_str(), caps_str.c_str());
     }
     
     void detect_device_type(libusb_device* device) {
@@ -170,15 +173,14 @@ struct USBDeviceDescriptor {
         obj.add("available", available);
         obj.add("kernel_driver_attached", kernel_driver_attached);
         
-        obj.add("available_capabilities", (int64_t)available_capabilities);
+        obj.add("available_capabilities", available_capabilities);
         obj.add("default_mode", Names::get_capability_name(default_mode));
         
         // Add capability names
         NoteBytes::Array caps_array;
-        for (int i = 0; i < 64; i++) {
-            uint64_t bit = 1ULL << i;
-            if (available_capabilities & bit) {
-                caps_array.add(NoteBytes::Value(Names::get_capability_name(bit)));
+        for (int i = 0; i < 128; i++) { 
+            if (bit_test(available_capabilities, i)) {
+                caps_array.add(NoteBytes::Value(Names::get_capability_name(i)));
             }
         }
         obj.add("capability_names", caps_array.as_value());
@@ -196,7 +198,7 @@ private:
     libusb_device_handle* device_handle = nullptr;
     int client_fd;
     pid_t client_pid = 0;
-    
+    cpp_int mode_mask = Masks::mode_mask();
     // Device states
     std::map<int32_t, std::shared_ptr<DeviceState>> device_states;
     std::map<std::string, std::shared_ptr<USBDeviceDescriptor>> available_devices;
@@ -463,18 +465,19 @@ private:
             send_error(NoteMessaging::ErrorCodes::ITEM_NOT_AVAILABLE, "Item not available");
             return;
         }
-        
+     
         // Validate mode
         if (!Validation::validate_mode_compatibility(device_desc->device_type, requested_mode)) {
-            send_error(NoteMessaging::ErrorCodes::MODE_INCOMPATIBLE, 
-                     "Mode not compatible with item type");
-            return;
-        }
+             send_error(NoteMessaging::ErrorCodes::MODE_INCOMPATIBLE, 
+                      "Mode not compatible with item type");
+             return;
+         }
         
-        uint64_t requested_mode_bit = Names::get_capability_bit(requested_mode);
-        if (!(device_desc->available_capabilities & requested_mode_bit)) {
+        int requested_mode_bit = Names::get_capability_bit(requested_mode);
+        if (!has_any_bits(device_desc->available_capabilities & mode_mask, 
+                        cpp_int(1) << requested_mode_bit)) {
             send_error(NoteMessaging::ErrorCodes::MODE_NOT_SUPPORTED, 
-                     "Item does not support requested mode");
+                    "Item does not support requested mode");
             return;
         }
         
@@ -508,11 +511,14 @@ private:
             device_desc->device_type,
             device_desc->available_capabilities
         );
+           
+        device_state->hardware_info.vendor_id = device_desc->vendor_id;
+        device_state->hardware_info.product_id = device_desc->product_id;
+        device_state->hardware_info.manufacturer = device_desc->manufacturer;
+        device_state->hardware_info.product = device_desc->product;
+        device_state->hardware_info.bus_number = device_desc->bus_number;
+        device_state->hardware_info.device_address = device_desc->device_address;
         
-        device_state->set_hardware_info("vendor_id", std::to_string(device_desc->vendor_id));
-        device_state->set_hardware_info("product_id", std::to_string(device_desc->product_id));
-        device_state->set_hardware_info("manufacturer", device_desc->manufacturer);
-        device_state->set_hardware_info("product", device_desc->product);
         
         if (!device_state->enable_mode(requested_mode)) {
             send_error(NoteMessaging::ErrorCodes::FEATURE_NOT_SUPPORTED, 
@@ -523,10 +529,11 @@ private:
         // Enable encryption for device if requested
         if (request_encryption && encryption_->is_active()) {
             device_state->state.add_flag(DeviceFlags::ENCRYPTION_ENABLED);
-            device_state->enabled_capabilities |= Bits::ENCRYPTION_ENABLED;
+            bit_set(device_state->enabled_capabilities, Bits::ENCRYPTION_ENABLED);
         }
         
         if (claim_usb_device(device_desc)) {
+            syslog(LOG_INFO, "USB device claimed successfully");
             // mark interface claimed flag
             device_state->state.add_flag(DeviceFlags::INTERFACE_CLAIMED);
             device_state->state.add_flag(DeviceFlags::CLAIMED);
@@ -537,10 +544,13 @@ private:
             
             send_accept(NoteMessaging::ProtocolMessages::ITEM_CLAIMED);
             
-            syslog(LOG_INFO, "Device claimed: %s (mode=%s, encrypted=%d)",
-                   device_id.c_str(), 
-                   device_state->get_current_mode().c_str(),
-                   request_encryption);
+            int current_mode_bit = device_state->get_current_mode_bit();
+            const char* currentModeName = Capabilities::Names::get_capability_name(current_mode_bit);
+            
+            syslog(LOG_INFO, "Starting event stream for %s in mode: %s (encrypted=%d)",
+                device_state->device_id.c_str(),
+                currentModeName,
+                device_state->state.has_flag(DeviceFlags::ENCRYPTION_ENABLED));
         } else {
             send_error(NoteMessaging::ErrorCodes::CLAIM_FAILED, 
                      "Failed to claim USB device");
@@ -756,12 +766,12 @@ private:
     
     void stream_device_events(std::shared_ptr<USBDeviceDescriptor> device_desc,
                              std::shared_ptr<DeviceState> device_state) {
-        uint64_t current_mode = device_state->get_current_mode_bit();
-        (void)current_mode; // silence unused-variable when streaming not implemented
+        int current_mode_bit = device_state->get_current_mode_bit();
+        const char* currentModeName = Capabilities::Names::get_capability_name(current_mode_bit);
         
         syslog(LOG_INFO, "Starting event stream for %s in mode: %s (encrypted=%d)",
                device_state->device_id.c_str(),
-               device_state->get_current_mode().c_str(),
+               currentModeName,
                device_state->state.has_flag(DeviceFlags::ENCRYPTION_ENABLED));
         const int MAX_PENDING = 64;
 
@@ -788,7 +798,7 @@ private:
                                                    buf, sizeof(buf), &transferred, 1000);
                 if (rc == 0 && transferred > 0) {
                     // If device is in parsed mode, run HID parser to create parsed events
-                    if (device_state->get_current_mode_bit() == Capabilities::Bits::PARSED_MODE) {
+                     if (current_mode_bit == Capabilities::Bits::PARSED_MODE) {
                         InputPacket::Factory factory(device_state->source_id);
                         HIDParser::HIDParser parser(device_desc->device_type, &factory);
                         auto parsed_packets = parser.parse_report(buf, transferred);

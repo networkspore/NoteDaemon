@@ -8,6 +8,7 @@ set(CMAKE_BUILD_TYPE Release)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 find_package(OpenSSL REQUIRED)
+find_package(Boost REQUIRED)
 
 # Source files
 file(GLOB_RECURSE SOURCES src/*.cpp)
@@ -19,6 +20,7 @@ add_executable(note-daemon ${SOURCES})
 target_include_directories(note-daemon PRIVATE
     include
     ${LIBUSB_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
 )
 
 # Link libraries
