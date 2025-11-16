@@ -12,7 +12,7 @@ Features
 Protocol
 ---
 Utilizes Netnotes binary object model
-(furture details to come)
+See: NoteBytes Wire Protocol Format
 
 Config 
 ---
