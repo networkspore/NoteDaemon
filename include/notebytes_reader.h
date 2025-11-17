@@ -261,50 +261,6 @@ public:
     }
 };
 
-/**
- * Helper function to read a complete packet from fd
- * Reads one complete Object
- */
-inline Object read_packet(int fd) {
-    Reader reader(fd, false);
-    return reader.read_object();
-}
-
-/**
- * Helper to read a routed message with sourceId prefix
- * Format: [INTEGER type][0x00000004][sourceId][OBJECT/ENCRYPTED][length][data]
- * @return pair of (source_id, object)
- */
-struct RoutedMessage {
-    int32_t source_id;
-    Object message;
-    bool is_encrypted;
-};
-
-inline RoutedMessage read_routed_packet(int fd) {
-    Reader reader(fd, false);
-    
-    // Read sourceId
-    Value sid_val = reader.read_value();
-    if (sid_val.type() != Type::INTEGER) {
-        throw std::runtime_error("Expected INTEGER sourceId");
-    }
-    
-    // Peek at next type to see if encrypted
-    MetaData next_meta = reader.peek_metadata();
-    bool encrypted = (next_meta.type == Type::ENCRYPTED);
-    
-    // Read the message object (or encrypted blob)
-    if (encrypted) {
-        // For encrypted messages, caller needs to decrypt
-        Value encrypted_val = reader.read_value();
-        Object dummy;  // Placeholder - caller must decrypt
-        return RoutedMessage{sid_val.as_int(), dummy, true};
-    } else {
-        Object obj = reader.read_object();
-        return RoutedMessage{sid_val.as_int(), obj, false};
-    }
-}
 
 } // namespace NoteBytes
 

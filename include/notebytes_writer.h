@@ -249,46 +249,6 @@ public:
     }
 };
 
-/**
- * Helper function to write a complete NoteBytes packet to fd
- * Writes and flushes immediately (no buffering)
- */
-inline bool write_packet(int fd, const Object& obj) {
-    try {
-        Writer writer(fd, false);
-        writer.write(obj);
-        writer.flush();
-        return true;
-    } catch (const std::exception& e) {
-        syslog(LOG_ERR, "Failed to write packet: %s", e.what());
-        return false;
-    }
-}
-
-inline bool write_packet(int fd, const std::vector<uint8_t>& packet) {
-    ssize_t written = ::write(fd, packet.data(), packet.size());
-    return written == static_cast<ssize_t>(packet.size());
-}
-
-/**
- * Helper to write a routed message with sourceId prefix
- * Format: [INTEGER type][0x00000004][sourceId][OBJECT/ENCRYPTED][length][data]
- */
-inline bool write_routed_packet(int fd, int32_t source_id, const Object& obj, 
-                               bool encrypt = false) {
-    Writer writer(fd, false);
-    
-    // Write sourceId as INTEGER type with full metadata
-    Value sid(source_id);
-    writer.write(sid);
-    
-    // Write object (already has its own metadata)
-    writer.write(obj);
-    
-    writer.flush();
-    return true;
-}
-
 } // namespace NoteBytes
 
 #endif // NOTEBYTES_WRITER_H

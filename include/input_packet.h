@@ -7,6 +7,7 @@
 
 #include "note_messaging.h"
 #include "notebytes.h"
+#include "notebytes_reader.h"
 #include "event_bytes.h"
 #include "atomic_sequence.h"
 #include "utils.h"
@@ -16,6 +17,22 @@
 
 namespace InputPacket {
 
+     /**
+     * Receive and route message
+     * Returns: {is_routed, source_id, message_object}
+     */
+    struct RoutedMessage {
+        bool is_routed;
+        int32_t source_id;
+        NoteBytes::Value message;
+
+        RoutedMessage() : is_routed(false), source_id(0) {}
+
+        inline bool isEncrypted() const { return message.type() == NoteBytes::Type::ENCRYPTED; }
+        inline bool isObject() const { return message.type() == NoteBytes::Type::OBJECT; }
+        inline bool isValid() const { return (isEncrypted() && source_id > 0 ) || isObject(); }
+    };
+    
 /**
  * Factory for creating input event packets
  * Matches Java InputPacket.Factory
@@ -235,42 +252,36 @@ public:
     }
 };
 
-/**
- * Helper function to read a packet from socket
- * Reads 5-byte header, then body
- */
-inline bool read_packet(int fd, std::vector<uint8_t>& buffer) {
-    // Read 5-byte header
-    uint8_t header[5];
-    ssize_t n = read(fd, header, 5);
-    if (n != 5) {
-        return false;
-    }
-    
-    uint8_t type = header[0];
-    uint32_t len = (header[1] << 24) | (header[2] << 16) | 
-                   (header[3] << 8) | header[4];
-    
-    if (type != NoteBytes::Type::OBJECT || len == 0 || len > 1024 * 1024) {
-        return false;
-    }
-    
-    // Read body
-    buffer.resize(5 + len);
-    memcpy(buffer.data(), header, 5);
-    
-    size_t total_read = 0;
-    while (total_read < len) {
-        n = read(fd, buffer.data() + 5 + total_read, len - total_read);
-        if (n <= 0) {
-            return false;
-        }
-        total_read += n;
-    }
-    
-    return true;
-}
+    inline RoutedMessage receive_message(int client_fd) {
+        InputPacket::RoutedMessage result;
+        
+        NoteBytes::Reader reader = NoteBytes::Reader(client_fd, false);
+        
+        NoteBytes::Value firstValue = reader.read_value();
+        
+        if (firstValue.type() == NoteBytes::Type::INTEGER) {
+            // Routed message
+            result.is_routed = true;
+            
+            result.source_id = firstValue.as_int();
 
+            result.message = reader.read_value();
+            
+            if (!result.isValid()) {
+                throw std::runtime_error("Invalid message type after sourceId: " + 
+                                       std::to_string(result.message.type()));
+            }
+            
+        } else if (firstValue.type() == NoteBytes::Type::OBJECT) {
+            // Non-routed control message
+            result.is_routed = false;
+            result.source_id = 0;
+            result.message = reader.read_value();
+            
+        }
+        
+        return result;
+    }
 /**
  * Helper function to write a packet to socket
  */

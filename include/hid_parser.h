@@ -11,9 +11,9 @@
 #include <map>
 #include <memory>
 #include "event_bytes.h"
-#include "input_packet.h"
 #include "notebytes.h"
 #include "atomic_sequence.h"
+#include "input_packet.h"
 #include <syslog.h>
 
 namespace HIDParser {

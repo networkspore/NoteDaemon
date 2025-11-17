@@ -771,7 +771,7 @@ private:
         
         // Create device session
         DeviceSession session(usb_ctx, client_fd, creds.pid);
-        session.handle_client_protocol_negotiation();
+        session.readSocket();
         
         syslog(LOG_INFO, "Client session ended: pid=%d", creds.pid);
         safe_close(client_fd);

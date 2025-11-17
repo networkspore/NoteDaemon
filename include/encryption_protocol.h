@@ -4,12 +4,14 @@
 #ifndef ENCRYPTION_PROTOCOL_H
 #define ENCRYPTION_PROTOCOL_H
 
+#include "atomic_sequence.h"
+#include "input_packet.h"
 #include "encryption.h"
 #include "note_messaging.h"
 #include "notebytes.h"
 #include "notebytes_writer.h"
+#include "notebytes_reader.h"
 #include "event_bytes.h"
-#include "input_packet.h"
 #include <memory>
 #include <syslog.h>
 #include <unistd.h>
@@ -289,7 +291,6 @@ public:
     bool send_routed_message(int client_fd, int32_t source_id,
                             const NoteBytes::Object& event,
                             bool encrypt = false) {
-        std::vector<uint8_t> packet;
         
         NoteBytes::Writer writer(client_fd, false);
         
@@ -297,14 +298,14 @@ public:
         // [0x03][0x00000004][4 bytes of sourceId]
         (void) writer.write(NoteBytes::Value(source_id));
         
-        // 2. Write event (encrypted or not)
+        // 2. SECOND NoteBytes value: event (OBJECT or ENCRYPTED)
         if (encrypt && handshake_.is_active()) {
-            // Serialize event with header: [0x0C][length][data]
-            auto event_packet = event.serialize_with_header();
+            // Serialize event object with header
+             auto event_packet = event.serialize_with_header();
             
-            // Encrypt entire packet (type + length + data)
+            // Encrypt the entire OBJECT packet
             auto ciphertext = handshake_.encrypt(event_packet);
-            
+
             // Write as ENCRYPTED type with metadata
             // [0x1A][length][encrypted bytes]
             NoteBytes::Value encrypted_val(ciphertext, NoteBytes::Type::ENCRYPTED);
@@ -334,7 +335,8 @@ public:
     bool send_routed_serialized(int client_fd, int32_t source_id,
                                 const std::vector<uint8_t>& event_packet,
                                 bool encrypt = false) {
-        // Write sourceId prefix first (no extra copy)
+        
+        
         NoteBytes::Writer writer(client_fd, false);
         // Write sourceId
         (void) writer.write(NoteBytes::Value(source_id));
@@ -364,84 +366,7 @@ public:
         }
     }
     
-    /**
-     * Receive and route message
-     * Returns: {is_routed, source_id, message_object}
-     */
-    struct RoutedMessage {
-        bool is_routed;
-        int32_t source_id;
-        NoteBytes::Object message;
-    };
-    
-    RoutedMessage receive_message(int client_fd, std::vector<uint8_t>& buffer) {
-        RoutedMessage result;
-        
-        if (!InputPacket::read_packet(client_fd, buffer)) {
-            throw std::runtime_error("Failed to read packet");
-        }
-        
-        uint8_t first_byte = buffer[0];
-        
-        if (first_byte == NoteBytes::Type::INTEGER) {
-            // Routed message
-            result.is_routed = true;
-            size_t offset = 0;
-            
-            // Read sourceId
-            NoteBytes::Value source_id_val = NoteBytes::Value::read_from(
-                buffer.data(), offset
-            );
-            result.source_id = source_id_val.as_int();
-            
-            // Read event (OBJECT or ENCRYPTED)
-            uint8_t event_type = buffer[offset];
-            
-            if (event_type == NoteBytes::Type::ENCRYPTED) {
-                // Read encrypted value
-                NoteBytes::Value encrypted = NoteBytes::Value::read_from(
-                    buffer.data(), offset
-                );
-                
-                // Decrypt
-                std::vector<uint8_t> decrypted;
-                if (!handshake_.decrypt(encrypted.data(), decrypted)) {
-                    throw std::runtime_error("Decryption failed");
-                }
-                
-                // Parse decrypted packet (contains [0x0C][length][data])
-                result.message = NoteBytes::Object::deserialize_from_packet(
-                    decrypted.data()
-                );
-                
-            } else if (event_type == NoteBytes::Type::OBJECT) {
-                // Unencrypted object
-                NoteBytes::Value event_val = NoteBytes::Value::read_from(
-                    buffer.data(), offset
-                );
-                
-                result.message = NoteBytes::Object::deserialize(
-                    event_val.data().data(),
-                    event_val.size()
-                );
-            } else {
-                throw std::runtime_error("Invalid event type after sourceId");
-            }
-            
-        } else if (first_byte == NoteBytes::Type::OBJECT) {
-            // Non-routed control message
-            result.is_routed = false;
-            result.source_id = 0;
-            result.message = NoteBytes::Object::deserialize_from_packet(
-                buffer.data()
-            );
-            
-        } else {
-            throw std::runtime_error("Invalid packet type");
-        }
-        
-        return result;
-    }
+   
     
 private:
     static void write_uint32_be(uint8_t* buffer, uint32_t value) {
