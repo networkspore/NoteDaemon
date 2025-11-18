@@ -30,19 +30,32 @@ to access:
 A recommended setup is to create a udev rule for the USB ports, and create dedicated user 
 and group for the application.
 
-Quick Setup: 
+QuickInstall:
+```
+#if you need curl:
+sudo apt update
+sudo apt install curl
 
-[Builder bash](build.sh) 
+#get install script
+curl -fsSL https://raw.githubusercontent.com/networkspore/NoteDaemon/master/download-install.sh -o 
 
-[autorun service](note-daemon.service) 
+install.sh
+less install.sh  # Review the script
+sudo bash install.sh
+```
 
-[USB rules](99-netnotes.rules) 
+Scripts: 
 
-[configuration bash](setup-netnotes.sh)
+[Download install](download-install.sh) 
+
+[Builder bash](build.sh)  
+
+[configuration bash](setup-netnotes.sh) 
+
+[Unintall](uninstall-netnotes.sh) 
 
 
 Download source and make bash files executable:
 ```
 chmod +x (bash file).sh
 ```
-[Unintall](uninstall-netnotes.sh)
