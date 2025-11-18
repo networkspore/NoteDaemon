@@ -21,12 +21,7 @@ Place configfile in your home directory under: ~/.netnotes/config (key=value for
 
 Installation
 ----
-Requires daemon and client to be part of the same group, and have adequate priveleges 
-to access:
-```
-/dev/bus/usb/*/*
-/dev/hidraw*
-```
+
 A recommended setup is to create a udev rule for the USB ports, and create dedicated user 
 and group for the application.
 
@@ -58,4 +53,11 @@ Scripts:
 Download source and make bash files executable:
 ```
 chmod +x (bash file).sh
+```
+
+Requires daemon and client to be part of the netnotes group, and have adequate priveleges 
+to access the socket and USB device - see [rules](99-netnotes.rules)
+```
+/dev/bus/usb/*/* #owned by root, cannot limit access
+/dev/hidraw* #limit access
 ```
