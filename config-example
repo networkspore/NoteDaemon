@@ -32,7 +32,7 @@
     "_comment": "Access control for daemon socket",
     "require_group": true,
     "_require_note": "Clients must be in socket.group or allowed_groups",
-    "allowed_groups": ["netnotes", "input"],
+    "allowed_groups": ["netnotes"],
     "_groups_note": "Additional groups that can connect",
     "allow_root_bypass": true,
     "_root_note": "Root can connect regardless of group membership"

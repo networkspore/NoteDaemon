@@ -1,4 +1,4 @@
-NoteDaemon - Secure IO Daemon
+NoteDaemon - Secure IO Daemon - (currently Linux only)
 ---
 
 NoteDaemon provides exclusive access to input devices, bypassing OS-level input systems for secure password entry and other security-critical input scenarios.
