@@ -5,6 +5,7 @@
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/fwd.hpp>
 #include "bitflag_state_bigint.h"
+#include "note_messaging.h"
 #include "notebytes.h"
 #include "capability_registry.h"
 
@@ -280,13 +281,13 @@ namespace State {
             // Convert to NoteBytes::Object for protocol transmission
             NoteBytes::Object to_notebytes() const {
                 NoteBytes::Object obj;
-                obj.add("vendor_id", vendor_id);
-                obj.add("product_id", product_id);
-                if (!manufacturer.empty()) obj.add("manufacturer", manufacturer);
-                if (!product.empty()) obj.add("product", product);
-                if (!serial_number.empty()) obj.add("serial_number", serial_number);
-                obj.add("bus_number", bus_number);
-                obj.add("device_address", device_address);
+                obj.add(NoteMessaging::Keys::VENDOR_ID, vendor_id);
+                obj.add(NoteMessaging::Keys::PRODUCT_ID, product_id);
+                if (!manufacturer.empty()) obj.add(NoteMessaging::Keys::MANUFACTURER, manufacturer);
+                if (!product.empty()) obj.add(NoteMessaging::Keys::PRODUCT, product);
+                if (!serial_number.empty()) obj.add(NoteMessaging::Keys::SERIAL_NUMBER, serial_number);
+                obj.add(NoteMessaging::Keys::BUS_NUMBER, bus_number);
+                obj.add(NoteMessaging::Keys::ITEM_ADDRESS, device_address);
                 return obj;
             }
         } hardware_info;
@@ -304,7 +305,7 @@ namespace State {
         DeviceState(const std::string& id, int32_t sid, pid_t pid,
                 const std::string& dev_type, const cpp_int& avail_caps)
             : device_id(id), source_id(sid), owner_pid(pid), 
-            state("device-" + std::to_string(sid)),
+            state(id),
             available_capabilities(avail_caps),
             enabled_capabilities(0),
             device_type(dev_type) {
@@ -407,8 +408,8 @@ namespace State {
     */
     inline NoteBytes::Object serialize_state_machine(const BitFlagStateMachine& sm) {
         NoteBytes::Object obj;
-        obj.add("id", sm.get_id());
-        obj.add("state", sm.get_state());
+        obj.add(NoteMessaging::Keys::ID, sm.get_id());
+        obj.add(NoteMessaging::Keys::STATE, sm.get_state());
         
         return obj;
     }
@@ -417,8 +418,8 @@ namespace State {
     * Deserialize NoteBytes::Object to BitFlagStateMachine
     */
     inline BitFlagStateMachine deserialize_state_machine(const NoteBytes::Object& obj) {
-        std::string id = obj.get_string("id", "unknown");
-        cpp_int state = obj.get_cpp_int("state");
+        std::string id = obj.get_string(NoteMessaging::Keys::ID, NoteMessaging::ItemTypes::UNKNOWN);
+        cpp_int state = obj.get_cpp_int(NoteMessaging::Keys::STATE);
         
         return BitFlagStateMachine(id, state);
     }
@@ -428,9 +429,9 @@ namespace State {
     */
     inline NoteBytes::Object serialize_client_session(const ClientSession& session) {
         NoteBytes::Object obj;
-        obj.add("session_id", session.session_id);
-        obj.add("client_pid", (int32_t)session.client_pid);
-        obj.add("state", session.state.get_state());
+        obj.add(NoteMessaging::Keys::SESSION_ID, session.session_id);
+        obj.add(NoteMessaging::Keys::PID, (int32_t)session.client_pid);
+        obj.add(NoteMessaging::Keys::STATE, session.state.get_state());
         
         obj.add("messages_sent", (int32_t)session.messages_sent.load());
         obj.add("messages_acked", (int32_t)session.messages_acknowledged.load());
@@ -447,16 +448,16 @@ namespace State {
     */
     inline NoteBytes::Object serialize_device_state(const DeviceState& device) {
         NoteBytes::Object obj;
-        obj.add("device_id", device.device_id);
-        obj.add("source_id", device.source_id);
-        obj.add("owner_pid", (int32_t)device.owner_pid);
-        obj.add("device_type", device.device_type);
+        obj.add(NoteMessaging::Keys::ITEM_ID, device.device_id);
+        obj.add(NoteMessaging::Keys::SOURCE_ID, device.source_id);
+        obj.add(NoteMessaging::Keys::PID, (int32_t)device.owner_pid);
+        obj.add(NoteMessaging::Keys::ITEM_TYPE, device.device_type);
         
-        obj.add("state", device.state.get_state());
+        obj.add(NoteMessaging::Keys::STATE, device.state.get_state());
         
-        obj.add("available_capabilities", device.available_capabilities);
-        obj.add("enabled_capabilities", device.enabled_capabilities);
-        obj.add("current_mode", device.get_current_mode_bit());
+        obj.add(NoteMessaging::Keys::AVAILABLE_CAPABILITIES, device.available_capabilities);
+        obj.add(NoteMessaging::Keys::ENABLED_CAPABILITIES, device.enabled_capabilities);
+        obj.add(NoteMessaging::Keys::CURRENT_MODE, device.get_current_mode_bit());
         
         obj.add("pending_events", (int32_t)device.pending_events.load());
         obj.add("events_sent", (int64_t)device.events_sent.load());
@@ -469,7 +470,7 @@ namespace State {
     * Sync state from protocol message (update local state machine from Java)
     */
     inline void sync_state_from_protocol(BitFlagStateMachine& sm, const NoteBytes::Object& msg) {
-        cpp_int new_state = msg.get_cpp_int("state");
+        cpp_int new_state = msg.get_cpp_int(NoteMessaging::Keys::STATE);
         sm.set_state(new_state);
     }
 
@@ -481,10 +482,10 @@ namespace State {
         const std::string& state_type  // "client" or "device"
     ) {
         NoteBytes::Object msg;
-        msg.add("type", "state_update");
-        msg.add("state_type", state_type);
-        msg.add("id", sm.get_id());
-        msg.add("state", sm.get_state());
+        msg.add(NoteMessaging::Keys::TYPE, "state_update");
+        msg.add(NoteMessaging::Keys::STATE_TYPE, state_type);
+        msg.add(NoteMessaging::Keys::ID, sm.get_id());
+        msg.add(NoteMessaging::Keys::STATE, sm.get_state());
         
         return msg;
     }

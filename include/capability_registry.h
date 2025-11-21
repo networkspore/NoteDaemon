@@ -126,10 +126,10 @@ namespace Names {
             case Bits::TOUCHPAD: return NoteMessaging::ItemTypes::TOUCHPAD;
             case Bits::SCROLL: return NoteMessaging::ItemTypes::SCROLL;
             
-            case Bits::RAW_MODE: return "raw_mode";
-            case Bits::PARSED_MODE: return "parsed_mode";
-            case Bits::PASSTHROUGH_MODE: return "passthrough_mode";
-            case Bits::FILTERED_MODE: return "filtered_mode";
+            case Bits::RAW_MODE: return NoteMessaging::Modes::RAW;
+            case Bits::PARSED_MODE: return NoteMessaging::Modes::PARSED;
+            case Bits::PASSTHROUGH_MODE: return NoteMessaging::Modes::PASSTHROUGH;
+            case Bits::FILTERED_MODE: return NoteMessaging::Modes::FILTERED;
             
             case Bits::ABSOLUTE_COORDINATES: return "absolute_coordinates";
             case Bits::RELATIVE_COORDINATES: return "relative_coordinates";
@@ -158,18 +158,18 @@ namespace Names {
     
     inline int get_capability_bit(const std::string& name) {
         static std::map<std::string, int> name_to_bit = {
-            {"keyboard", Bits::KEYBOARD},
-            {"mouse", Bits::MOUSE},
-            {"touch", Bits::TOUCH},
-            {"gamepad", Bits::GAMEPAD},
-            {"pen", Bits::PEN},
-            {"touchpad", Bits::TOUCHPAD},
-            {"scroll", Bits::SCROLL},
+            {NoteMessaging::ItemTypes::KEYBOARD, Bits::KEYBOARD},
+            {NoteMessaging::ItemTypes::MOUSE, Bits::MOUSE},
+            {NoteMessaging::ItemTypes::TOUCHPAD, Bits::TOUCH},
+            {NoteMessaging::ItemTypes::GAMEPAD, Bits::GAMEPAD},
+            {NoteMessaging::ItemTypes::PEN, Bits::PEN},
+            {NoteMessaging::ItemTypes::TOUCHPAD, Bits::TOUCHPAD},
+            {NoteMessaging::ItemTypes::SCROLL, Bits::SCROLL},
             
-            {"raw_mode", Bits::RAW_MODE},
-            {"parsed_mode", Bits::PARSED_MODE},
-            {"passthrough_mode", Bits::PASSTHROUGH_MODE},
-            {"filtered_mode", Bits::FILTERED_MODE},
+            {NoteMessaging::Modes::RAW, Bits::RAW_MODE},
+            {NoteMessaging::Modes::PARSED, Bits::PARSED_MODE},
+            {NoteMessaging::Modes::PASSTHROUGH, Bits::PASSTHROUGH_MODE},
+            {NoteMessaging::Modes::FILTERED, Bits::FILTERED_MODE},
             
             {"absolute_coordinates", Bits::ABSOLUTE_COORDINATES},
             {"relative_coordinates", Bits::RELATIVE_COORDINATES},
@@ -241,7 +241,7 @@ namespace Validation {
 
     inline const char* get_mode_name(const cpp_int& state) {
         int mode = get_enabled_mode(state);
-        if (mode < 0) return "none";
+        if (mode < 0) return NoteMessaging::Modes::NONE;
         return Names::get_capability_name(mode);
     }
     
@@ -265,13 +265,13 @@ namespace Validation {
 
     inline bool validate_mode_compatibility(const std::string& device_type, const std::string& requested_mode) {
         // Raw mode works with everything
-        if (requested_mode == "raw_mode") {
+        if (requested_mode == NoteMessaging::Modes::RAW) {
             return true;
         }
         
         // Parsed mode requires known device type
-        if (requested_mode == "parsed_mode") {
-            return device_type != "unknown";
+        if (requested_mode == NoteMessaging::Modes::PARSED) {
+            return device_type != NoteMessaging::Modes::UNKNOWN;
         }
         
         return true;
@@ -327,7 +327,7 @@ namespace Detection {
     }
     
     inline int get_default_mode(const std::string& device_type) {
-        if (device_type == "unknown") {
+        if (device_type == NoteMessaging::ItemTypes::UNKNOWN) {
             return Bits::RAW_MODE;
         } else {
             return Bits::PARSED_MODE;

@@ -78,57 +78,84 @@ namespace NoteMessaging{
 
     namespace Keys {
         // Identity & Routing
-        constexpr const char* TYPE          = "type";      // Message type (byte)
-        constexpr const char* SEQUENCE      = "seqId";     // Sequence ID (6 bytes)
-        constexpr const char* SOURCE_ID     = "sourceId";     // Source identifier
-        constexpr const char* SESSION_ID    = "sessionId"; // Session identifier
-        constexpr const char* PID           = "pid";       // Process ID
-        
+        constexpr const char* UUID_128      = "uuid_128";
+        // Identity & Routing
+        constexpr const char* ID            = "id";
+        constexpr const char* TYPE          = "type";
+        constexpr const char* SEQUENCE      = "seq_id";
+        constexpr const char* SOURCE_ID     = "source_id";
+        constexpr const char* SESSION_ID    = "session_id";
+        constexpr const char* PID           = "pid";
+        constexpr const char* RECEIVER_ID   = "receiver_id";
+        constexpr const char* SENDER_ID     = "sender_id";
+        constexpr const char* CODE_KEY      = "code";
+        constexpr const char* CURRENT_MODE  = "current_mode";
+        constexpr const char* STATE_TYPE    = "state_type";
         // Metadata
-        constexpr const char* NAME          = "name";      // Human-readable name
-        constexpr const char* TIMESTAMP     = "timeStamp"; // Unix timestamp (ms)
-        constexpr const char* VERSION       = "version";   // Protocol version
+        constexpr const char* NAME          = "name";
+        constexpr const char* TIMESTAMP     = "time_stamp";
+        constexpr const char* VERSION       = "version";
         
         // Payload
-        constexpr const char* PAYLOAD       = "payload";   // Event payload array
-        constexpr const char* STATE_FLAGS   = "stFlags";   // State flags (int)
-        constexpr const char* CMD           = "cmd";       // Command string
+        constexpr const char* PAYLOAD       = "payload";
+        constexpr const char* STATE_FLAGS   = "state_flags";
+        constexpr const char* CMD           = "cmd";
         
         // Status & Results
-        constexpr const char* STATUS        = "status";    // Status message
-        constexpr const char* ERROR_CODE    = "error";     // Error code (int)
-        constexpr const char* MSG           = "msg";       // Human message
-        constexpr const char* RESULT        = "result";    // Operation result
-        constexpr const char* WARNING       = "warning";   // Warning message
-        
+        constexpr const char* STATUS        = "status";
+        constexpr const char* ERROR_CODE    = "error";
+        constexpr const char* MSG           = "msg";
+        constexpr const char* RESULT        = "result";
+        constexpr const char* WARNING       = "warning";
+        constexpr const char* EXCEPTION     = "exception";
+        constexpr const char* AVAILABLE     = "available";
+
         // Items (Generic resource term)
-        constexpr const char* ITEM          = "item";      // Single item
-        constexpr const char* ITEMS         = "items";     // Item array
-        constexpr const char* ITEM_ID       = "itemId";    // Item identifier
-        constexpr const char* ITEM_TYPE     = "itemType";  // Item type string
-        
-        // Item Lifecycle
-        constexpr const char* MODE          = "mode";      // Operating mode
-        constexpr const char* AVAILABLE     = "available"; // Availability flag
-        constexpr const char* CLAIMED       = "claimed";   // Claim status
-        
+        constexpr const char* ITEM          = "item";
+        constexpr const char* ITEMS         = "items";
+        constexpr const char* ITEM_ID       = "item_id";
+        constexpr const char* ITEM_TYPE     = "item_type";
+        constexpr const char* ITEM_COUNT    = "item_count";
+        constexpr const char* ITEM_PATH     = "item_path";
+        constexpr const char* ITEM_CLASS        = "item_class";
+        constexpr const char* ITEM_SUBCLASS     = "item_subclass";
+        constexpr const char* ITEM_PROTOCOL     = "item_protocol";
+        constexpr const char* ITEM_ADDRESS      = "item_address";
+       
+        constexpr const char* VENDOR_ID         = "vendor_id";
+        constexpr const char* PRODUCT_ID        = "product_id";
+        constexpr const char* BUS_NUMBER        = "bus_number";
+        constexpr const char* MANUFACTURER      = "manufacturer";
+        constexpr const char* PRODUCT           = "product";
+        constexpr const char* SERIAL_NUMBER     = "serial_number";
+        constexpr const char* KERNEL_DRIVER_ATTACHED    = "kernel_driver_attached";
         // Capabilities
-        constexpr const char* CAPABILITIES      = "capabilities";      // Capability set
-        constexpr const char* AVAILABLE_CAPS    = "availableCaps";    // Available caps
-        constexpr const char* ENABLED_CAPS      = "enabledCaps";      // Enabled caps
-        constexpr const char* DEFAULT_MODE      = "defaultMode";      // Default mode
+        constexpr const char* MODE                      = "mode";
+        constexpr const char* AVAILABLE_CAPABILITIES    = "available_capabilities";        
+        constexpr const char* CLAIMED_ITEMS             = "claimedItems";
+        constexpr const char* ENABLED_CAPABILITIES      = "enabled_capabilities";
+        constexpr const char* CAPABILITY_NAMES          = "capability_names";
+        constexpr const char* AVAILABLE_MODES           = "available_modes";
+
+        
+        constexpr const char* DEFAULT_MODE      = "default_mode";
+        constexpr const char* CONSTRAINTS       = "constraints";
+        constexpr const char* CHILDREN          = "children";
         
         // Encryption
-        constexpr const char* ENCRYPTION    = "encryption"; // Encryption flag
-        constexpr const char* CIPHER        = "cipher";     // Ciphertext
-        constexpr const char* PHASE         = "phase";      // Handshake phase
-        constexpr const char* PUBLIC_KEY    = "pubKey";     // Public key
-        constexpr const char* AES_IV        = "aesIV";      // AES IV
+        constexpr const char* ENCRYPTION    = "encryption";
+        constexpr const char* CIPHER        = "cipher";
+        constexpr const char* PHASE         = "phase";
+        constexpr const char* PUBLIC_KEY    = "pub_key";
+        constexpr const char* AES_IV        = "aes_iv";
         
         // Flow Control
-        constexpr const char* PROCESSED_COUNT = "processedCount"; // Ack count
-        constexpr const char* TOTAL           = "total";          // Total count
-        constexpr const char* COMPLETED       = "completed";      // Completed count
+        constexpr const char* PROCESSED_COUNT = "processed_count";
+        constexpr const char* TOTAL           = "total";
+        constexpr const char* COMPLETED       = "completed";
+
+        constexpr const char* SCOPE         = "scope";
+        constexpr const char* STATE         = "state";
     }
 
     // =============================================================================
@@ -162,6 +189,8 @@ namespace NoteMessaging{
         constexpr const char* PARSED        = "parsed";        // Parsed events
         constexpr const char* PASSTHROUGH   = "passthrough";   // OS passthrough
         constexpr const char* FILTERED      = "filtered";      // With filters
+        constexpr const char* UNKNOWN       = ItemTypes::UNKNOWN;
+        constexpr const char* NONE          = "none";
     }
 
     // =============================================================================
