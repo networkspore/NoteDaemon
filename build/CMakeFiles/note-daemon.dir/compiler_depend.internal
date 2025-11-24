@@ -12,6 +12,7 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o
  /home/iospore/Dev/Netnotes/NoteDaemon/include/event_bytes.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/hid_parser.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/input_packet.h
+ /home/iospore/Dev/Netnotes/NoteDaemon/include/key_code.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/note_messaging.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_reader.h

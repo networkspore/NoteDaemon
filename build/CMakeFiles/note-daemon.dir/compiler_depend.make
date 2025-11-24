@@ -11,6 +11,7 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
   /home/iospore/Dev/Netnotes/NoteDaemon/include/event_bytes.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/hid_parser.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/input_packet.h \
+  /home/iospore/Dev/Netnotes/NoteDaemon/include/key_code.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/note_messaging.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_reader.h \
@@ -1144,6 +1145,8 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/tsxldtrkintrin.h:
 
+/usr/lib/gcc/x86_64-linux-gnu/13/include/tmmintrin.h:
+
 /usr/include/boost/type_traits/make_void.hpp:
 
 /usr/include/boost/type_traits/is_unsigned.hpp:
@@ -1710,20 +1713,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/utility/identity_type.hpp:
 
-/usr/include/boost/mpl/aux_/na.hpp:
-
-/usr/include/boost/math/cstdfloat/cstdfloat_cmath.hpp:
-
-/usr/include/boost/version.hpp:
-
-/usr/include/boost/exception/exception.hpp:
-
-/usr/include/boost/math/ccmath/isnan.hpp:
-
-/usr/include/boost/numeric/conversion/detail/preprocessed/numeric_cast_traits_long_long.hpp:
-
-/usr/include/unistd.h:
-
 /usr/include/boost/integer/common_factor_rt.hpp:
 
 /usr/include/x86_64-linux-gnu/bits/mathcalls-helper-functions.h:
@@ -1838,6 +1827,14 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/avx512vlintrin.h:
 
+/usr/include/boost/math/ccmath/isnan.hpp:
+
+/usr/include/boost/exception/exception.hpp:
+
+/usr/include/boost/numeric/conversion/detail/preprocessed/numeric_cast_traits_long_long.hpp:
+
+/usr/include/unistd.h:
+
 /usr/include/boost/preprocessor/array/size.hpp:
 
 /usr/include/boost/preprocessor/inc.hpp:
@@ -1862,6 +1859,14 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/c++/13/bits/uniform_int_dist.h:
 
+/usr/include/x86_64-linux-gnu/bits/struct_mutex.h:
+
+/home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_reader.h:
+
+/usr/include/boost/integer.hpp:
+
+/usr/include/boost/mpl/aux_/na_fwd.hpp:
+
 /home/iospore/Dev/Netnotes/NoteDaemon/include/utils.h:
 
 /usr/include/boost/mpl/aux_/static_cast.hpp:
@@ -1884,17 +1889,13 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/concept/usage.hpp:
 
-/usr/include/boost/integer.hpp:
-
-/usr/include/boost/mpl/aux_/na_fwd.hpp:
-
-/usr/include/x86_64-linux-gnu/bits/struct_mutex.h:
-
-/home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_reader.h:
-
 /usr/include/asm-generic/sockios.h:
 
 /usr/include/c++/13/bits/stl_relops.h:
+
+/usr/include/boost/preprocessor/facilities/overload.hpp:
+
+/usr/include/boost/mpl/aux_/numeric_cast_utils.hpp:
 
 /usr/include/boost/mpl/eval_if.hpp:
 
@@ -1931,16 +1932,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/c++/13/bits/ptr_traits.h:
 
 /usr/include/boost/core/checked_delete.hpp:
-
-/usr/include/boost/preprocessor/variadic/size.hpp:
-
-/usr/include/boost/mpl/aux_/template_arity.hpp:
-
-/usr/include/boost/mpl/identity.hpp:
-
-/usr/include/c++/13/numbers:
-
-/usr/include/boost/core/cmath.hpp:
 
 /usr/include/boost/current_function.hpp:
 
@@ -1998,18 +1989,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/asm-generic/types.h:
 
-/usr/include/c++/13/bits/locale_facets.tcc:
-
-/home/iospore/Dev/Netnotes/NoteDaemon/include/note_messaging.h:
-
-/usr/include/x86_64-linux-gnu/c++/13/bits/cpu_defines.h:
-
-/usr/include/boost/concept/assert.hpp:
-
-/usr/include/boost/math/special_functions/next.hpp:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/stdarg.h:
-
 /usr/include/signal.h:
 
 /usr/include/x86_64-linux-gnu/bits/struct_stat.h:
@@ -2022,6 +2001,18 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/mpl/aux_/adl_barrier.hpp:
 
+/usr/include/c++/13/bits/locale_facets.tcc:
+
+/home/iospore/Dev/Netnotes/NoteDaemon/include/note_messaging.h:
+
+/usr/include/x86_64-linux-gnu/c++/13/bits/cpu_defines.h:
+
+/usr/include/boost/concept/assert.hpp:
+
+/usr/include/boost/math/special_functions/next.hpp:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/stdarg.h:
+
 /usr/include/boost/iterator/iterator_categories.hpp:
 
 /usr/include/boost/detail/workaround.hpp:
@@ -2031,6 +2022,22 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/asm-generic/bitsperlong.h:
 
 /usr/include/boost/mpl/apply_fwd.hpp:
+
+/usr/include/boost/math/cstdfloat/cstdfloat_cmath.hpp:
+
+/usr/include/boost/version.hpp:
+
+/home/iospore/Dev/Netnotes/NoteDaemon/include/key_code.h:
+
+/usr/include/boost/preprocessor/variadic/size.hpp:
+
+/usr/include/boost/core/cmath.hpp:
+
+/usr/include/boost/mpl/aux_/template_arity.hpp:
+
+/usr/include/boost/mpl/identity.hpp:
+
+/usr/include/c++/13/numbers:
 
 /usr/include/x86_64-linux-gnu/bits/xopen_lim.h:
 
@@ -2107,6 +2114,8 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/multiprecision/traits/is_variable_precision.hpp:
 
 /usr/include/boost/container/container_fwd.hpp:
+
+/usr/include/boost/mpl/aux_/na.hpp:
 
 /usr/include/boost/math/tools/is_constant_evaluated.hpp:
 
@@ -2441,10 +2450,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/utility.hpp:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/avx512ifmavlintrin.h:
-
-/usr/include/boost/preprocessor/facilities/overload.hpp:
-
-/usr/include/boost/mpl/aux_/numeric_cast_utils.hpp:
 
 /usr/include/boost/mpl/aux_/config/has_apply.hpp:
 
@@ -3369,5 +3374,3 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/lib/gcc/x86_64-linux-gnu/13/include/quadmath.h:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/tmmintrin.h:

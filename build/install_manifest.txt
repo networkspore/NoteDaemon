@@ -1,3 +1,0 @@
-/usr/local/bin/note-daemon
-/etc/systemd/system/note-daemon.service
-/etc/udev/rules.d/99-netnotes.rules

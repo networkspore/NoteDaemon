@@ -701,7 +701,6 @@ private:
         // Create device state using deviceId as identifier
         auto device_state = std::make_shared<DeviceState>(
             device_id,           // device_id
-            device_id,           // Use same deviceId for state tracking
             client_pid,
             device_desc->device_type,
             device_desc->available_capabilities);
