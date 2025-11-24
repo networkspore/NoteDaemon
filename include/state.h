@@ -259,7 +259,6 @@ namespace State {
     */
     struct DeviceState {
         std::string device_id;
-        int32_t source_id;
         pid_t owner_pid;
         BitFlagStateMachine state;
         
@@ -302,9 +301,9 @@ namespace State {
         std::mutex queue_mutex;
         std::condition_variable queue_cv;
         
-        DeviceState(const std::string& id, int32_t sid, pid_t pid,
+        DeviceState(const std::string& id, pid_t pid,
                 const std::string& dev_type, const cpp_int& avail_caps)
-            : device_id(id), source_id(sid), owner_pid(pid), 
+            : device_id(id), owner_pid(pid), 
             state(id),
             available_capabilities(avail_caps),
             enabled_capabilities(0),
@@ -448,8 +447,7 @@ namespace State {
     */
     inline NoteBytes::Object serialize_device_state(const DeviceState& device) {
         NoteBytes::Object obj;
-        obj.add(NoteMessaging::Keys::ITEM_ID, device.device_id);
-        obj.add(NoteMessaging::Keys::SOURCE_ID, device.source_id);
+        obj.add(NoteMessaging::Keys::DEVICE_ID, device.device_id);
         obj.add(NoteMessaging::Keys::PID, (int32_t)device.owner_pid);
         obj.add(NoteMessaging::Keys::ITEM_TYPE, device.device_type);
         

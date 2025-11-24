@@ -12,48 +12,50 @@
 #include "atomic_sequence.h"
 #include "utils.h"
 #include <cstdint>
+#include <string>
 #include <vector>
 #include <cstring>
 
 namespace InputPacket {
 
-     /**
-     * Receive and route message
-     * Returns: {is_routed, source_id, message_object}
-     */
-    struct RoutedMessage {
-        bool is_routed;
-        int32_t source_id;
-        NoteBytes::Value message;
+/**
+ * Receive and route message
+ * Returns: {is_routed, device_id, message_object}
+ */
+struct RoutedMessage {
+    bool is_routed;
+    NoteBytes::Value device_id;
+    NoteBytes::Value message;
 
-        RoutedMessage() : is_routed(false), source_id(0) {}
+    RoutedMessage() : is_routed(false), device_id(0) {}
 
-        inline bool isEncrypted() const { return message.type() == NoteBytes::Type::ENCRYPTED; }
-        inline bool isObject() const { return message.type() == NoteBytes::Type::OBJECT; }
-        inline bool isValid() const { return (isEncrypted() && source_id > 0 ) || isObject(); }
-    };
-    
+    inline bool isEncrypted() const { return message.type() == NoteBytes::Type::ENCRYPTED; }
+    inline bool isObject() const { return message.type() == NoteBytes::Type::OBJECT; }
+    inline bool isValid() const { return (isEncrypted() && device_id.type() == NoteBytes::Type::STRING) || isObject(); }
+};
+
 /**
  * Factory for creating input event packets
  * Matches Java InputPacket.Factory
  */
 class Factory {
 private:
-    int32_t source_id_;
+    std::string device_id_;
     
 public:
-    explicit Factory(int32_t source_id) : source_id_(source_id) {}
+    explicit Factory(const std::string& device_id) : device_id_(device_id) {}
     
-    int32_t get_source_id() const { return source_id_; }
-    void set_source_id(int32_t source_id) { source_id_ = source_id; }
+    std::string get_device_id() const { return device_id_; }
+    void set_device_id(const std::string& device_id) { device_id_ = device_id; }
+    
     /**
      * Core packet creation method
      * Creates packet with: [5-byte header][NoteBytesObject body]
      * 
      * Body structure:
-     * - src: source ID (int)
+     * - device_id: device ID (string)
      * - typ: event type (byte)
-     * - seq: atomic sequence (6 bytes raw)
+     * - seq: atomic sequence (8 bytes LONG)
      * - stF: state flags (int) [optional, if non-zero]
      * - pld: payload array [optional, if provided]
      */
@@ -63,14 +65,11 @@ public:
         NoteBytes::Object packet;
         
         // Always include these fields
-        packet.add(NoteMessaging::Keys::SOURCE_ID, source_id_);
+        packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
         packet.add(NoteMessaging::Keys::TYPE, event_type);
         
-        // Add atomic sequence (6 bytes)
-        uint8_t seq_bytes[6];
-        AtomicSequence::get_next(seq_bytes);
-        packet.add(NoteMessaging::Keys::SEQUENCE, 
-                  NoteBytes::Value(seq_bytes, 6, NoteBytes::Type::RAW_BYTES));
+        // Add atomic sequence (8 bytes LONG)
+        packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
         // Add state flags if non-zero
         if (state_flags != 0) {
@@ -89,7 +88,12 @@ public:
         return packet.serialize_with_header();
     }
     
-    // Keyboard event creators
+    // ===== Generic Key Event Creator =====
+    
+    /**
+     * Generic key event creator for any key event type
+     * Used for KEY_DOWN, KEY_UP, KEY_REPEAT
+     */
     std::vector<uint8_t> create_key_event(uint8_t type, int key, int scancode, int state_flags) {
         std::vector<NoteBytes::Value> payload = {
             NoteBytes::Value(key),
@@ -97,6 +101,8 @@ public:
         };
         return create(type, state_flags, &payload);
     }
+    
+    // ===== Keyboard Event Creators =====
     
     std::vector<uint8_t> create_key_down(int key, int scancode, int state_flags) {
         std::vector<NoteBytes::Value> payload = {
@@ -122,6 +128,10 @@ public:
         return create(EventBytes::EVENT_KEY_REPEAT, state_flags, &payload);
     }
     
+    /**
+     * Create EVENT_KEY_CHAR event (codepoint only, no modifiers)
+     * Legacy method for compatibility
+     */
     std::vector<uint8_t> create_key_char(int codepoint, int state_flags) {
         std::vector<NoteBytes::Value> payload = {
             NoteBytes::Value(codepoint)
@@ -129,7 +139,21 @@ public:
         return create(EventBytes::EVENT_KEY_CHAR, state_flags, &payload);
     }
     
-    // Mouse event creators
+    /**
+     * Create EVENT_KEY_CHAR_MODS event (codepoint with modifier flags)
+     * This is the NanoVG/GLFW-compatible character event
+     * 
+     * Payload: [codepoint]
+     * State flags include: MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, etc.
+     */
+    std::vector<uint8_t> create_key_char_mods(int codepoint, int state_flags) {
+        std::vector<NoteBytes::Value> payload = {
+            NoteBytes::Value(codepoint)
+        };
+        return create(EventBytes::EVENT_KEY_CHAR_MODS, state_flags, &payload);
+    }
+    
+    // ===== Mouse Event Creators =====
     
     std::vector<uint8_t> create_mouse_move(double x, double y, int state_flags) {
         std::vector<NoteBytes::Value> payload = {
@@ -176,7 +200,7 @@ public:
         return create(EventBytes::EVENT_SCROLL, state_flags, &payload);
     }
     
-    // Focus events
+    // ===== Focus Events =====
     
     std::vector<uint8_t> create_focus_gained() {
         return create(EventBytes::EVENT_FOCUS_GAINED);
@@ -186,7 +210,7 @@ public:
         return create(EventBytes::EVENT_FOCUS_LOST);
     }
     
-    // Window events
+    // ===== Window Events =====
     
     std::vector<uint8_t> create_framebuffer_resize(int width, int height) {
         std::vector<NoteBytes::Value> payload = {
@@ -196,7 +220,7 @@ public:
         return create(EventBytes::EVENT_FRAMEBUFFER_RESIZE, 0, &payload);
     }
     
-    // Protocol control messages
+    // ===== Protocol Control Messages =====
     
     std::vector<uint8_t> create_disconnected() {
         return create(EventBytes::TYPE_DISCONNECTED);
@@ -204,14 +228,9 @@ public:
     
     std::vector<uint8_t> create_error(int error_code, const std::string& message) {
         NoteBytes::Object packet;
-        packet.add(NoteMessaging::Keys::SOURCE_ID, source_id_);
+        packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
         packet.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ERROR);
-        
-        uint8_t seq_bytes[6];
-        AtomicSequence::get_next(seq_bytes);
-        packet.add(NoteMessaging::Keys::SEQUENCE, 
-                  NoteBytes::Value(seq_bytes, 6, NoteBytes::Type::RAW_BYTES));
-        
+        packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         packet.add(NoteMessaging::Keys::ERROR_CODE, error_code);
         packet.add(NoteMessaging::Keys::MSG, message);
         
@@ -220,30 +239,24 @@ public:
     
     std::vector<uint8_t> create_accept(const std::string& status = "ok") {
         NoteBytes::Object packet;
-        packet.add(NoteMessaging::Keys::SOURCE_ID, source_id_);
+        packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
         packet.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ACCEPT);
         
-        uint8_t seq_bytes[6];
-        AtomicSequence::get_next(seq_bytes);
-        packet.add(NoteMessaging::Keys::SEQUENCE, 
-                  NoteBytes::Value(seq_bytes, 6, NoteBytes::Type::RAW_BYTES));
+       
+        packet.add(NoteMessaging::Keys::SEQUENCE, NoteBytes::Value(AtomicSequence64::get_next()));
         
         packet.add(NoteMessaging::Keys::STATUS, status);
         
         return packet.serialize_with_header();
     }
     
-    // Encrypted packet wrapper
+    // ===== Encrypted Packet Wrapper =====
+    
     std::vector<uint8_t> create_encrypted(const uint8_t* ciphertext, size_t len) {
         NoteBytes::Object packet;
-        packet.add(NoteMessaging::Keys::SOURCE_ID, source_id_);
+        packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
         packet.add(NoteMessaging::Keys::TYPE, EventBytes::EVENT_KEY_DOWN); // Type embedded in encrypted data
-        
-        uint8_t seq_bytes[6];
-        AtomicSequence::get_next(seq_bytes);
-        packet.add(NoteMessaging::Keys::SEQUENCE, 
-                  NoteBytes::Value(seq_bytes, 6, NoteBytes::Type::RAW_BYTES));
-        
+        packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         packet.add(NoteMessaging::Keys::ENCRYPTION, true);
         packet.add(NoteMessaging::Keys::CIPHER, 
                   NoteBytes::Value(ciphertext, len, NoteBytes::Type::RAW_BYTES));
@@ -252,36 +265,41 @@ public:
     }
 };
 
-    inline RoutedMessage receive_message(int client_fd) {
-        InputPacket::RoutedMessage result;
+/**
+ * Receive message from socket and parse routing
+ */
+inline RoutedMessage receive_message(int client_fd) {
+    InputPacket::RoutedMessage result;
+    
+    NoteBytes::Reader reader = NoteBytes::Reader(client_fd, false);
+    
+    NoteBytes::Value firstValue = reader.read_value();
+    
+    if (firstValue.type() == NoteBytes::Type::STRING) {
+        // Routed message: [STRING:deviceId][OBJECT/ENCRYPTED:payload]
+        result.is_routed = true;
+        result.device_id = firstValue;
+        result.message = reader.read_value();
         
-        NoteBytes::Reader reader = NoteBytes::Reader(client_fd, false);
-        
-        NoteBytes::Value firstValue = reader.read_value();
-        
-        if (firstValue.type() == NoteBytes::Type::INTEGER) {
-            // Routed message
-            result.is_routed = true;
-            
-            result.source_id = firstValue.as_int();
-
-            result.message = reader.read_value();
-            
-            if (!result.isValid()) {
-                throw std::runtime_error("Invalid message type after sourceId: " + 
-                                       std::to_string(result.message.type()));
-            }
-            
-        } else if (firstValue.type() == NoteBytes::Type::OBJECT) {
-            // Non-routed control message
-            result.is_routed = false;
-            result.source_id = 0;
-            result.message = reader.read_value();
-            
+        if (!result.isValid()) {
+            throw std::runtime_error("Invalid message type after deviceId: " + 
+                                   std::to_string(static_cast<int>(result.message.type())));
         }
         
-        return result;
+    } else if (firstValue.type() == NoteBytes::Type::OBJECT) {
+        // Non-routed control message: [OBJECT:message]
+        result.is_routed = false;
+        result.device_id = NoteBytes::Value(0);
+        result.message = firstValue;
+        
+    } else {
+        throw std::runtime_error("Invalid first value type: " + 
+                               std::to_string(static_cast<int>(firstValue.type())));
     }
+    
+    return result;
+}
+
 /**
  * Helper function to write a packet to socket
  */

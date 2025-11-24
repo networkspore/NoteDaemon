@@ -9,6 +9,7 @@
 
 namespace EventBytes {
 
+   
 // Mouse events (1-14)
 constexpr uint8_t EVENT_MOUSE_MOVE_RELATIVE = 1;
 constexpr uint8_t EVENT_MOUSE_BUTTON_DOWN = 2;
@@ -84,19 +85,32 @@ namespace StateFlags {
     constexpr int MOD_SUPER = 0x0008;      // Windows/Command key
     constexpr int MOD_CAPS_LOCK = 0x0010;
     constexpr int MOD_NUM_LOCK = 0x0020;
-    
+    constexpr int MOD_SCROLL_LOCK = 0x0040;
+
+     constexpr int MOD_MASK = 0x000000FF;
+
     // Mouse buttons (bits 8-15)
     constexpr int MOUSE_BUTTON_1 = 0x0100;  // Left
     constexpr int MOUSE_BUTTON_2 = 0x0200;  // Right
     constexpr int MOUSE_BUTTON_3 = 0x0400;  // Middle
     constexpr int MOUSE_BUTTON_4 = 0x0800;
     constexpr int MOUSE_BUTTON_5 = 0x1000;
+    constexpr int MOUSE_BUTTON_6 = 0x2000;
+    constexpr int MOUSE_BUTTON_7 = 0x4000;
+    constexpr int MOUSE_BUTTON_8 = 0x8000;
+
+    constexpr int MOUSE_BUTTON_MASK = 0x0000FF00;
+
     
     // Event state flags (bits 16-23)
-    constexpr int STATE_CONSUMED = 0x010000;   // Event has been handled
-    constexpr int STATE_BUBBLING = 0x020000;   // Event is bubbling up
+    constexpr int STATE_CONSUMED  = 0x010000;  // Event has been handled
+    constexpr int STATE_BUBBLING  = 0x020000;  // Event is bubbling up
     constexpr int STATE_CAPTURING = 0x040000;  // Event is in capture phase
     constexpr int STATE_SYNTHETIC = 0x080000;  // Generated, not from OS
+    constexpr int STATE_RECORDED  = 0x100000;  // Event was recorded
+    constexpr int STATE_REPLAYING = 0x200000;  // Event is from playback
+
+    constexpr int EVENT_STATE_MASK = 0x00FF0000;
     
     inline bool has_flag(int state, int flag) {
         return (state & flag) != 0;

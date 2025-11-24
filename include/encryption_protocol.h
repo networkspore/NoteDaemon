@@ -1,20 +1,18 @@
 // include/encryption_protocol.h
-// Protocol integration for encryption handshake and message wrapping
+// Protocol integration for encryption handshake
+// NOTE: This class ONLY handles encryption/decryption, NOT socket I/O
 
 #ifndef ENCRYPTION_PROTOCOL_H
 #define ENCRYPTION_PROTOCOL_H
 
 #include "atomic_sequence.h"
-#include "input_packet.h"
 #include "encryption.h"
 #include "note_messaging.h"
 #include "notebytes.h"
-#include "notebytes_writer.h"
-#include "notebytes_reader.h"
 #include "event_bytes.h"
 #include <memory>
 #include <syslog.h>
-#include <unistd.h>
+#include <vector>
 
 namespace EncryptionProtocol {
 
@@ -30,21 +28,24 @@ enum class State {
 
 /**
  * Encryption handshake manager
- * Handles DH key exchange via protocol messages
+ * Handles DH key exchange and encrypt/decrypt operations
+ * Does NOT handle socket I/O - caller is responsible for sending/receiving
  */
 class EncryptionHandshake {
 private:
     std::unique_ptr<Encryption::DHKeyExchange> dh_;
     std::unique_ptr<Encryption::EncryptedSession> session_;
     State state_ = State::DISABLED;
-    int client_fd_;
+    std::string device_id_;  // For logging only
     
 public:
-    EncryptionHandshake(int client_fd) 
-        : client_fd_(client_fd) {}
+    EncryptionHandshake() = default;
+    
+    explicit EncryptionHandshake(const std::string& device_id) 
+        : device_id_(device_id) {}
     
     /**
-     * Check if encryption is available
+     * Check if encryption is available (OpenSSL compiled in)
      */
     static bool is_available() {
         #ifdef HAVE_OPENSSL
@@ -56,7 +57,8 @@ public:
     
     /**
      * Start encryption negotiation
-     * Returns public key to send to client
+     * Generates our DH key pair
+     * Returns true if ready to exchange keys
      */
     bool start_negotiation() {
         if (!is_available()) {
@@ -65,7 +67,8 @@ public:
             return false;
         }
         
-        syslog(LOG_INFO, "Starting encryption negotiation");
+        syslog(LOG_INFO, "Starting encryption negotiation for device: %s", 
+               device_id_.c_str());
         
         dh_ = std::make_unique<Encryption::DHKeyExchange>();
         if (!dh_->is_initialized()) {
@@ -79,9 +82,10 @@ public:
     }
     
     /**
-     * Get our public key to send to client
+     * Get our public key to send to peer
+     * Returns empty vector if negotiation not started
      */
-    std::vector<uint8_t> get_public_key() {
+    std::vector<uint8_t> get_public_key() const {
         if (!dh_) {
             return std::vector<uint8_t>();
         }
@@ -89,24 +93,27 @@ public:
     }
     
     /**
-     * Receive client's public key and finalize encryption
+     * Set peer's public key and finalize encryption
+     * After this, encrypt/decrypt will be available
      */
-    bool finalize(const std::vector<uint8_t>& client_public_key) {
+    bool finalize(const std::vector<uint8_t>& peer_public_key) {
         if (state_ != State::NEGOTIATING || !dh_) {
-            syslog(LOG_ERR, "finalize: Invalid state");
+            syslog(LOG_ERR, "finalize: Invalid state for device %s", device_id_.c_str());
             return false;
         }
         
         // Set peer's public key
-        if (!dh_->set_peer_public_key(client_public_key)) {
-            syslog(LOG_ERR, "finalize: Failed to set peer public key");
+        if (!dh_->set_peer_public_key(peer_public_key)) {
+            syslog(LOG_ERR, "finalize: Failed to set peer public key for device %s", 
+                   device_id_.c_str());
             state_ = State::FAILED;
             return false;
         }
         
         // Derive shared secret
         if (!dh_->derive_shared_secret()) {
-            syslog(LOG_ERR, "finalize: Failed to derive shared secret");
+            syslog(LOG_ERR, "finalize: Failed to derive shared secret for device %s", 
+                   device_id_.c_str());
             state_ = State::FAILED;
             return false;
         }
@@ -114,42 +121,93 @@ public:
         // Initialize encrypted session
         session_ = std::make_unique<Encryption::EncryptedSession>();
         if (!session_->init(dh_->get_shared_secret())) {
-            syslog(LOG_ERR, "finalize: Failed to initialize session");
+            syslog(LOG_ERR, "finalize: Failed to initialize session for device %s", 
+                   device_id_.c_str());
             state_ = State::FAILED;
             return false;
         }
         
         state_ = State::ACTIVE;
-        syslog(LOG_INFO, "Encryption active");
+        syslog(LOG_INFO, "Encryption active for device: %s", device_id_.c_str());
         return true;
     }
     
     /**
-     * Encrypt a message
+     * Encrypt a packet
+     * Input: plaintext bytes
+     * Output: ciphertext bytes
+     * Returns empty vector on failure
      */
     std::vector<uint8_t> encrypt(const std::vector<uint8_t>& plaintext) {
         if (state_ != State::ACTIVE || !session_) {
-            return plaintext; // Pass through if not active
+            syslog(LOG_WARNING, "encrypt called but encryption not active for device %s", 
+                   device_id_.c_str());
+            return std::vector<uint8_t>(); // Return empty on error
         }
         
         return session_->encrypt_packet(plaintext.data(), plaintext.size());
     }
     
     /**
-     * Decrypt a message
+     * Encrypt a packet (pointer + size variant)
+     */
+    std::vector<uint8_t> encrypt(const uint8_t* data, size_t len) {
+        if (state_ != State::ACTIVE || !session_) {
+            syslog(LOG_WARNING, "encrypt called but encryption not active for device %s", 
+                   device_id_.c_str());
+            return std::vector<uint8_t>();
+        }
+        
+        return session_->encrypt_packet(data, len);
+    }
+    
+    /**
+     * Decrypt a packet
+     * Input: ciphertext bytes
+     * Output: plaintext written to output buffer
+     * Returns true on success
      */
     bool decrypt(const std::vector<uint8_t>& ciphertext,
                  std::vector<uint8_t>& plaintext) {
         if (state_ != State::ACTIVE || !session_) {
-            plaintext = ciphertext; // Pass through if not active
-            return true;
+            syslog(LOG_WARNING, "decrypt called but encryption not active for device %s", 
+                   device_id_.c_str());
+            return false;
         }
         
-        plaintext.resize(ciphertext.size());
+        plaintext.resize(ciphertext.size() + 32); // Extra space for potential padding
         size_t plain_len = plaintext.size();
         
         bool success = session_->decrypt_packet(
             ciphertext.data(), ciphertext.size(),
+            plaintext.data(), &plain_len
+        );
+        
+        if (success) {
+            plaintext.resize(plain_len);
+        } else {
+            syslog(LOG_ERR, "Decryption failed for device %s", device_id_.c_str());
+        }
+        
+        return success;
+    }
+    
+    /**
+     * Decrypt a packet (pointer + size variant)
+     */
+    bool decrypt(const uint8_t* ciphertext, size_t cipher_len,
+                 std::vector<uint8_t>& plaintext) {
+        if (state_ != State::ACTIVE || !session_) {
+            syslog(LOG_WARNING, "decrypt called but encryption not active for device %s", 
+                   device_id_.c_str());
+            return false;
+        }
+        
+        plaintext.resize(cipher_len + 32);
+        size_t plain_len = plaintext.size();
+        
+        bool success = session_->decrypt_packet(
+            ciphertext, cipher_len,
             plaintext.data(), &plain_len
         );
         
@@ -160,11 +218,9 @@ public:
         return success;
     }
     
-    State get_state() const { return state_; }
-    bool is_active() const { return state_ == State::ACTIVE; }
-    
     /**
      * Get current IV for synchronization
+     * Used in ENCRYPTION_READY message
      */
     std::vector<uint8_t> get_iv() const {
         if (session_) {
@@ -172,16 +228,49 @@ public:
         }
         return std::vector<uint8_t>();
     }
+    
+    /**
+     * Clear all encryption state and keys
+     * Called when device is released or error occurs
+     */
+    void clear() {
+        if (dh_) {
+            dh_.reset();
+        }
+        if (session_) {
+            session_.reset();
+        }
+        state_ = State::DISABLED;
+        syslog(LOG_INFO, "Encryption cleared for device: %s", device_id_.c_str());
+    }
+    
+    // State queries
+    State get_state() const { return state_; }
+    bool is_active() const { return state_ == State::ACTIVE; }
+    bool is_negotiating() const { return state_ == State::NEGOTIATING; }
+    bool has_failed() const { return state_ == State::FAILED; }
+    
+    std::string get_device_id() const { return device_id_; }
+    void set_device_id(const std::string& device_id) { device_id_ = device_id; }
 };
 
 /**
  * Protocol message builders for encryption handshake
+ * These build NoteBytes::Object messages - caller sends them via socket
  */
 class Messages {
 public:
     /**
      * Build ENCRYPTION_OFFER message
      * Sent by server to offer encryption to client
+     * 
+     * Format:
+     * {
+     *   "type": TYPE_ENCRYPTION_OFFER,
+     *   "sequence": <8-byte sequence>,
+     *   "cipher": "aes-256-gcm",
+     *   "public_key": <server DH public key>
+     * }
      */
     static NoteBytes::Object build_encryption_offer(
         const std::vector<uint8_t>& server_public_key,
@@ -189,12 +278,7 @@ public:
     ) {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ENCRYPTION_OFFER);
-        
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        msg.add(NoteMessaging::Keys::SEQUENCE, 
-               NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
-        
+        msg.add(NoteMessaging::Keys::SEQUENCE,AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::CIPHER, cipher);
         msg.add(NoteMessaging::Keys::PUBLIC_KEY, 
                NoteBytes::Value(server_public_key.data(), 
@@ -206,177 +290,101 @@ public:
     
     /**
      * Parse ENCRYPTION_ACCEPT message from client
+     * 
+     * Expected format:
+     * {
+     *   "type": TYPE_ENCRYPTION_ACCEPT,
+     *   "sequence": <sequence>,
+     *   "public_key": <client DH public key>
+     * }
      */
     static bool parse_encryption_accept(const NoteBytes::Object& msg,
                                        std::vector<uint8_t>& client_public_key) {
-        auto key_value = msg.get("client_public_key");
-        if (key_value->type() != NoteBytes::Type::RAW_BYTES) {
-            syslog(LOG_ERR, "parse_encryption_accept: missing or invalid client_public_key");
+        // Use constant from Keys
+        auto key_value = msg.get(NoteMessaging::Keys::PUBLIC_KEY);
+        if (!key_value || key_value->type() != NoteBytes::Type::RAW_BYTES) {
+            syslog(LOG_ERR, "parse_encryption_accept: missing or invalid public_key");
             return false;
         }
         
         client_public_key = key_value->data();
+        
+        if (client_public_key.empty()) {
+            syslog(LOG_ERR, "parse_encryption_accept: empty public key");
+            return false;
+        }
+        
         return true;
     }
     
     /**
      * Build ENCRYPTION_READY message
-     * Confirms encryption is now active
+     * Confirms encryption is now active and provides IV
+     * 
+     * Format:
+     * {
+     *   "type": TYPE_ENCRYPTION_READY,
+     *   "sequence": <sequence>,
+     *   "iv": <initialization vector>,
+     *   "status": "active"
+     * }
      */
     static NoteBytes::Object build_encryption_ready(
         const std::vector<uint8_t>& iv
     ) {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ENCRYPTION_READY);
+        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        msg.add(NoteMessaging::Keys::SEQUENCE,
-               NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
+        msg.add(NoteMessaging::Keys::IV, 
+               NoteBytes::Value(iv.data(), iv.size(), NoteBytes::Type::RAW_BYTES));
+        msg.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::ACTIVE);
         
-        msg.add("iv", NoteBytes::Value(iv.data(), iv.size(), 
-                                      NoteBytes::Type::RAW_BYTES));
-        msg.add(NoteMessaging::Keys::STATUS, "encryption_active");
+        return msg;
+    }
+    
+    /**
+     * Build ENCRYPTION_DECLINE message
+     * Client declines encryption offer
+     * 
+     * Format:
+     * {
+     *   "type": TYPE_ENCRYPTION_DECLINE,
+     *   "sequence": <sequence>,
+     *   "reason": <string>
+     * }
+     */
+    static NoteBytes::Object build_encryption_decline(const std::string& reason) {
+        NoteBytes::Object msg;
+        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ENCRYPTION_DECLINE);
+        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
+        msg.add(NoteMessaging::Keys::MSG, reason);
         
         return msg;
     }
     
     /**
      * Build ENCRYPTION_ERROR message
+     * Sent when encryption setup fails
+     * 
+     * Format:
+     * {
+     *   "type": TYPE_ERROR,
+     *   "sequence": <sequence>,
+     *   "error_code": ERROR_ENCRYPTION_FAILED,
+     *   "message": <error description>
+     * }
      */
     static NoteBytes::Object build_encryption_error(const std::string& reason) {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ERROR);
-        
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        msg.add(NoteMessaging::Keys::SEQUENCE,
-               NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
-        
-        msg.add(NoteMessaging::Keys::ERROR_CODE, 
-               NoteMessaging::ErrorCodes::ENCRYPTION_FAILED);
+        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
+        msg.add(NoteMessaging::Keys::ERROR_CODE,NoteMessaging::ErrorCodes::ENCRYPTION_FAILED);
         msg.add(NoteMessaging::Keys::MSG, reason);
         
         return msg;
     }
 };
-
-/**
- * Encrypted message wrapper
- * Handles encryption of routed messages at the NoteBytes level
- */
-class EncryptedMessageWrapper {
-private:
-    EncryptionHandshake& handshake_;
-    
-public:
-    EncryptedMessageWrapper(EncryptionHandshake& handshake)
-        : handshake_(handshake) {}
-    
-    /**
-     * Send non-routed control message (never encrypted)
-     * Format: [OBJECT type][length][pairs...]
-     */
-    bool send_control_message(int client_fd, const NoteBytes::Object& msg) {
-        NoteBytes::Writer writer(client_fd, false);
-        (void) writer.write(msg);
-        (void) writer.flush();
-        return true;
-    }
-    
-    /**
-     * Send routed device message (optionally encrypted)
-     * Format: [INTEGER type][0x00000004][sourceId bytes][OBJECT or ENCRYPTED][length][data...]
-     */
-    bool send_routed_message(int client_fd, int32_t source_id,
-                            const NoteBytes::Object& event,
-                            bool encrypt = false) {
-        
-        NoteBytes::Writer writer(client_fd, false);
-        
-        // 1. Write sourceId as INTEGER with full metadata
-        // [0x03][0x00000004][4 bytes of sourceId]
-        (void) writer.write(NoteBytes::Value(source_id));
-        
-        // 2. SECOND NoteBytes value: event (OBJECT or ENCRYPTED)
-        if (encrypt && handshake_.is_active()) {
-            // Serialize event object with header
-             auto event_packet = event.serialize_with_header();
-            
-            // Encrypt the entire OBJECT packet
-            auto ciphertext = handshake_.encrypt(event_packet);
-
-            // Write as ENCRYPTED type with metadata
-            // [0x1A][length][encrypted bytes]
-            NoteBytes::Value encrypted_val(ciphertext, NoteBytes::Type::ENCRYPTED);
-            (void) writer.write(encrypted_val);
-            
-            // Zero out ciphertext
-            std::fill(ciphertext.begin(), ciphertext.end(), 0);
-        } else {
-
-            // Write as normal OBJECT with metadata
-            (void) writer.write(event);
-        }
-        
-        try {
-            (void) writer.flush();
-            return true;
-        } catch (const std::exception& e) {
-            syslog(LOG_ERR, "Failed to send routed message: %s", e.what());
-            return false;
-        }
-    }
-
-    /**
-    * Send a pre-serialized event packet (with 5-byte NoteBytes header) as a routed message.
-    * Used when we already have a serialized packet from HID parser.
-    */
-    bool send_routed_serialized(int client_fd, int32_t source_id,
-                                const std::vector<uint8_t>& event_packet,
-                                bool encrypt = false) {
-        
-        
-        NoteBytes::Writer writer(client_fd, false);
-        // Write sourceId
-        (void) writer.write(NoteBytes::Value(source_id));
-
-        if (encrypt && handshake_.is_active()) {
-            // Encrypt entire event packet (including its header)
-            auto ciphertext = handshake_.encrypt(event_packet);
-
-            // Write as ENCRYPTED
-            NoteBytes::Value encrypted_val(ciphertext, NoteBytes::Type::ENCRYPTED);
-            (void) writer.write(encrypted_val);
-
-            // Zero out ciphertext buffer
-            std::fill(ciphertext.begin(), ciphertext.end(), 0);
-
-        } else {
-            // Write pre-serialized packet as raw (it already has metadata)
-            (void) writer.write_raw(event_packet);
-        }
-
-        try {
-            (void) writer.flush();
-            return true;
-        } catch (const std::exception& e) {
-            syslog(LOG_ERR, "Failed to send routed serialized: %s", e.what());
-            return false;
-        }
-    }
-    
-   
-    
-private:
-    static void write_uint32_be(uint8_t* buffer, uint32_t value) {
-        buffer[0] = (value >> 24) & 0xFF;
-        buffer[1] = (value >> 16) & 0xFF;
-        buffer[2] = (value >> 8) & 0xFF;
-        buffer[3] = value & 0xFF;
-    }
-};
-
 
 } // namespace EncryptionProtocol
 

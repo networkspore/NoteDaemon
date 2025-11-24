@@ -1,5 +1,5 @@
 // include/device_session.h
-// Refactored: Socket reader routes messages, devices stream independently
+// Refactored: Uses deviceId (string) instead of sourceId (int32_t) throughout
 
 #ifndef DEVICE_SESSION_H
 #define DEVICE_SESSION_H
@@ -153,7 +153,7 @@ struct USBDeviceDescriptor {
     
     NoteBytes::Object to_notebytes() const {
         NoteBytes::Object obj;
-        obj.add(NoteMessaging::Keys::ITEM_ID, device_id);
+        obj.add(NoteMessaging::Keys::DEVICE_ID, device_id);
         obj.add("vendor_id", vendor_id);
         obj.add("product_id", product_id);
         obj.add("device_class", device_class);
@@ -188,26 +188,30 @@ struct USBDeviceDescriptor {
 
 /**
  * Device streaming thread
- * Runs independently, reads USB and sends events (encrypted if device encryption is active)
+ * Runs independently, reads USB and sends events with deviceId prefix
+ * Format: [STRING:deviceId][OBJECT:event] or [STRING:deviceId][ENCRYPTED:event]
  */
 class DeviceStreamingThread {
 private:
     std::shared_ptr<USBDeviceDescriptor> device_desc_;
     std::shared_ptr<DeviceState> device_state_;
-    int32_t source_id_;
+    std::string device_id_;
     int client_fd_;
+    EncryptionProtocol::EncryptionHandshake* encryption_; // Non-owning pointer
     std::thread thread_;
     
 public:
     DeviceStreamingThread(
         std::shared_ptr<USBDeviceDescriptor> device_desc,
         std::shared_ptr<DeviceState> device_state,
-        int32_t source_id,
-        int client_fd)
+        const std::string& device_id,
+        int client_fd,
+        EncryptionProtocol::EncryptionHandshake* encryption = nullptr)
         : device_desc_(device_desc)
         , device_state_(device_state)
-        , source_id_(source_id)
-        , client_fd_(client_fd) {}
+        , device_id_(device_id)
+        , client_fd_(client_fd)
+        , encryption_(encryption) {}
     
     ~DeviceStreamingThread() {
         stop();
@@ -226,13 +230,18 @@ public:
         }
     }
     
+    // Allow updating encryption pointer after construction
+    void set_encryption(EncryptionProtocol::EncryptionHandshake* encryption) {
+        encryption_ = encryption;
+    }
+    
 private:
     void run() {
         int current_mode_bit = device_state_->get_current_mode_bit();
         const char* mode_name = Capabilities::Names::get_capability_name(current_mode_bit);
         
-        syslog(LOG_INFO, "Device streaming started: %s (sourceId=%d, mode=%s, encrypted=%d)",
-               device_state_->device_id.c_str(), source_id_, mode_name,
+        syslog(LOG_INFO, "Device streaming started: %s (deviceId=%s, mode=%s, encrypted=%d)",
+               device_state_->device_id.c_str(), device_id_.c_str(), mode_name,
                device_state_->state.has_flag(DeviceFlags::ENCRYPTION_ENABLED));
         
         const int MAX_PENDING = 64;
@@ -287,13 +296,11 @@ private:
         
         if (current_mode_bit == Capabilities::Bits::PARSED_MODE) {
             // Parse HID report into events
-            InputPacket::Factory factory(source_id_);
+            InputPacket::Factory factory(device_id_);
             HIDParser::HIDParser parser(device_desc_->device_type, &factory);
             auto parsed_packets = parser.parse_report(data, length);
             
             for (const auto& pkt : parsed_packets) {
-                // Note: Encryption handled by device session, not here
-                // Just send with sourceId prefix
                 if (!send_event_packet(pkt)) {
                     device_state_->state.remove_flag(DeviceFlags::STREAMING);
                     return;
@@ -303,12 +310,8 @@ private:
             // RAW_MODE: send raw HID data
             NoteBytes::Object event_obj;
             event_obj.add(NoteMessaging::Keys::TYPE, EventBytes::EVENT_RAW_HID);
-            
-            uint8_t seq[6];
-            AtomicSequence::get_next(seq);
-            event_obj.add(NoteMessaging::Keys::SEQUENCE,
-                         NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
-            
+            event_obj.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
+    
             NoteBytes::Array payload;
             payload.add(NoteBytes::Value(data, length, NoteBytes::Type::RAW_BYTES));
             event_obj.add(NoteMessaging::Keys::PAYLOAD, payload.as_value());
@@ -323,11 +326,7 @@ private:
     void send_synthetic_event() {
         NoteBytes::Object event_obj;
         event_obj.add(NoteMessaging::Keys::TYPE, EventBytes::EVENT_KEY_DOWN);
-        
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        event_obj.add(NoteMessaging::Keys::SEQUENCE,
-                     NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
+        event_obj.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
         NoteBytes::Array payload;
         payload.add(NoteBytes::Value((int32_t)65)); // 'A'
@@ -341,18 +340,19 @@ private:
     }
     
     bool send_event_packet(const std::vector<uint8_t>& event_packet) {
-        // Send as routed message: [sourceId][event_packet]
-        // Encryption is handled at the session level, not here
+        // Send as routed message: [STRING:deviceId][OBJECT/ENCRYPTED:event_packet]
+        // Format: deviceId is always sent as STRING type, followed by the event
         NoteBytes::Writer writer(client_fd_, false);
-        (void) writer.write(NoteBytes::Value(source_id_));
-        (void) writer.write_raw(event_packet);
+        writer.write(NoteBytes::Value(device_id_));  // Write deviceId as STRING
+        writer.write_raw(event_packet);
         
         try {
-            (void) writer.flush();
+            writer.flush();
             device_state_->event_queued();
             return true;
         } catch (const std::exception& e) {
-            syslog(LOG_ERR, "Failed to send event for device %d: %s", source_id_, e.what());
+            syslog(LOG_ERR, "Failed to send event for device %s: %s", 
+                   device_id_.c_str(), e.what());
             return false;
         }
     }
@@ -360,6 +360,7 @@ private:
 
 /**
  * Device Session - manages protocol and routing
+ * All devices identified by deviceId (string) throughout
  */
 class DeviceSession {
 private:
@@ -368,13 +369,13 @@ private:
     pid_t client_pid = 0;
     cpp_int mode_mask = Masks::mode_mask();
     
-    // Device management
-    std::map<int32_t, std::shared_ptr<DeviceState>> device_states;
-    std::map<int32_t, std::unique_ptr<DeviceStreamingThread>> streaming_threads;
+    // Device management - keyed by deviceId (string)
+    std::map<std::string, std::shared_ptr<DeviceState>> device_states;
+    std::map<std::string, std::unique_ptr<DeviceStreamingThread>> streaming_threads;
     std::map<std::string, std::shared_ptr<USBDeviceDescriptor>> available_devices;
     
-    // Per-device encryption (sourceId -> encryption handshake)
-    std::map<int32_t, std::unique_ptr<EncryptionProtocol::EncryptionHandshake>> device_encryptions_;
+    // Per-device encryption - keyed by deviceId (string)
+    std::map<std::string, std::unique_ptr<EncryptionProtocol::EncryptionHandshake>> device_encryptions_;
     
 public:
     DeviceSession(libusb_context* ctx, int client, pid_t pid) 
@@ -386,7 +387,7 @@ public:
     
     ~DeviceSession() {
         // Stop all streaming threads
-        for (auto& [source_id, thread] : streaming_threads) {
+        for (auto& [device_id, thread] : streaming_threads) {
             thread->stop();
         }
         streaming_threads.clear();
@@ -410,7 +411,7 @@ public:
                 }
                 
                 if (routed.is_routed) {
-                    // Message has sourceId - route to device (may be encrypted device data OR encryption negotiation)
+                    // Message has deviceId - route to device
                     handle_routed_message(routed);
                 } else {
                     // Control message - handle protocol (NEVER encrypted)
@@ -429,7 +430,7 @@ public:
     
 private:
     /**
-     * Handle control messages (no sourceId) - NEVER encrypted
+     * Handle control messages (no deviceId) - NEVER encrypted
      */
     void handle_control_message(const NoteBytes::Object& msg) {
         uint8_t msg_type = msg.get_byte(NoteMessaging::Keys::TYPE);
@@ -460,13 +461,16 @@ private:
     }
     
     /**
-     * Handle routed messages (has sourceId)
-     * Can be: encryption negotiation for device, encrypted data, or plaintext device commands
+     * Handle routed messages (has deviceId prefix)
+     * Format: [STRING:deviceId][OBJECT/ENCRYPTED:payload]
+     * Can be: encryption negotiation, encrypted data, or plaintext device commands
      */
     void handle_routed_message(const InputPacket::RoutedMessage& routed) {
-        auto it = device_states.find(routed.source_id);
+        std::string device_id = routed.device_id.as_string();
+        
+        auto it = device_states.find(device_id);
         if (it == device_states.end()) {
-            syslog(LOG_WARNING, "Message for unknown sourceId: %d", routed.source_id);
+            syslog(LOG_WARNING, "Message for unknown deviceId: %s", device_id.c_str());
             return;
         }
         
@@ -482,30 +486,30 @@ private:
             
             // Handle encryption negotiation messages
             if (msg_type == EventBytes::TYPE_ENCRYPTION_ACCEPT) {
-                handle_device_encryption_accept(routed.source_id, msg);
+                handle_device_encryption_accept(device_id, msg);
                 return;
             } else if (msg_type == EventBytes::TYPE_ENCRYPTION_DECLINE) {
-                handle_device_encryption_decline(routed.source_id);
+                handle_device_encryption_decline(device_id);
                 return;
             }
             
             // Other plaintext device commands
-            syslog(LOG_DEBUG, "Received plaintext command type %d for device %d", 
-                   msg_type, routed.source_id);
+            syslog(LOG_DEBUG, "Received plaintext command type %d for device %s", 
+                   msg_type, device_id.c_str());
         }
         
         // Handle encrypted device data
         if (routed.isEncrypted()) {
-            auto enc_it = device_encryptions_.find(routed.source_id);
+            auto enc_it = device_encryptions_.find(device_id);
             if (enc_it == device_encryptions_.end() || !enc_it->second->is_active()) {
-                syslog(LOG_ERR, "Received encrypted message for device %d but no active encryption", 
-                       routed.source_id);
+                syslog(LOG_ERR, "Received encrypted message for device %s but no active encryption", 
+                       device_id.c_str());
                 return;
             }
             
             std::vector<uint8_t> plaintext;
             if (!enc_it->second->decrypt(routed.message.data(), plaintext)) {
-                syslog(LOG_ERR, "Decryption failed for device %d", routed.source_id);
+                syslog(LOG_ERR, "Decryption failed for device %s", device_id.c_str());
                 return;
             }
             
@@ -513,22 +517,22 @@ private:
                 plaintext.data(), plaintext.size());
             
             uint8_t event_type = event_obj.get_byte(NoteMessaging::Keys::TYPE);
-            syslog(LOG_DEBUG, "Received encrypted event type %d for device %d", 
-                   event_type, routed.source_id);
+            syslog(LOG_DEBUG, "Received encrypted event type %d for device %s", 
+                   event_type, device_id.c_str());
         }
     }
     
-    void offer_device_encryption(int32_t source_id) {
-        auto encryption = std::make_unique<EncryptionProtocol::EncryptionHandshake>(client_fd);
+    void offer_device_encryption(const std::string& device_id) {
+        auto encryption = std::make_unique<EncryptionProtocol::EncryptionHandshake>(device_id);
         
         if (!encryption->start_negotiation()) {
-            syslog(LOG_ERR, "Failed to start encryption for device %d", source_id);
+            syslog(LOG_ERR, "Failed to start encryption for device %s", device_id.c_str());
             return;
         }
         
         auto server_public_key = encryption->get_public_key();
         if (server_public_key.empty()) {
-            syslog(LOG_ERR, "Failed to get public key for device %d", source_id);
+            syslog(LOG_ERR, "Failed to get public key for device %s", device_id.c_str());
             return;
         }
         
@@ -536,63 +540,69 @@ private:
         auto offer_msg = EncryptionProtocol::Messages::build_encryption_offer(
             server_public_key, "aes-256-gcm");
         
-        // Send WITH sourceId prefix - this is a routed message
-        send_routed_control_message(source_id, offer_msg);
+        // Send WITH deviceId prefix - this is a routed message
+        send_routed_control_message(device_id, offer_msg);
         
         // Store pending encryption for this device
-        device_encryptions_[source_id] = std::move(encryption);
+        device_encryptions_[device_id] = std::move(encryption);
         
-        syslog(LOG_INFO, "Sent encryption offer for device %d", source_id);
+        syslog(LOG_INFO, "Sent encryption offer for device %s", device_id.c_str());
         std::fill(server_public_key.begin(), server_public_key.end(), 0);
     }
     
-    void handle_device_encryption_accept(int32_t source_id, const NoteBytes::Object& msg) {
-        auto it = device_encryptions_.find(source_id);
+    void handle_device_encryption_accept(const std::string& device_id, const NoteBytes::Object& msg) {
+        auto it = device_encryptions_.find(device_id);
         if (it == device_encryptions_.end()) {
-            syslog(LOG_ERR, "Received encryption accept for device %d but no pending negotiation", 
-                   source_id);
+            syslog(LOG_ERR, "Received encryption accept for device %s but no pending negotiation", 
+                   device_id.c_str());
             return;
         }
         
         std::vector<uint8_t> client_public_key;
         if (!EncryptionProtocol::Messages::parse_encryption_accept(msg, client_public_key)) {
-            syslog(LOG_ERR, "Failed to parse encryption accept for device %d", source_id);
-            send_device_encryption_error(source_id, "Invalid public key");
+            syslog(LOG_ERR, "Failed to parse encryption accept for device %s", device_id.c_str());
+            send_device_encryption_error(device_id, "Invalid public key");
             device_encryptions_.erase(it);
             return;
         }
         
         if (!it->second->finalize(client_public_key)) {
-            syslog(LOG_ERR, "Failed to finalize encryption for device %d", source_id);
-            send_device_encryption_error(source_id, "Key exchange failed");
+            syslog(LOG_ERR, "Failed to finalize encryption for device %s", device_id.c_str());
+            send_device_encryption_error(device_id, "Key exchange failed");
             std::fill(client_public_key.begin(), client_public_key.end(), 0);
             device_encryptions_.erase(it);
             return;
         }
         
         // Mark device as encrypted
-        auto dev_it = device_states.find(source_id);
+        auto dev_it = device_states.find(device_id);
         if (dev_it != device_states.end()) {
             dev_it->second->state.add_flag(DeviceFlags::ENCRYPTION_ENABLED);
             bit_set(dev_it->second->enabled_capabilities, Bits::ENCRYPTION_ENABLED);
+            
+            // Update streaming thread with encryption pointer
+            auto thread_it = streaming_threads.find(device_id);
+            if (thread_it != streaming_threads.end()) {
+                thread_it->second->set_encryption(it->second.get());
+            }
         }
         
-        // Send ready message (with sourceId prefix)
+        // Send ready message (with deviceId prefix)
         auto ready_msg = EncryptionProtocol::Messages::build_encryption_ready(it->second->get_iv());
-        send_routed_control_message(source_id, ready_msg);
+        send_routed_control_message(device_id, ready_msg);
         
-        syslog(LOG_INFO, "Encryption active for device %d", source_id);
+        syslog(LOG_INFO, "Encryption active for device %s", device_id.c_str());
         std::fill(client_public_key.begin(), client_public_key.end(), 0);
     }
     
-    void handle_device_encryption_decline(int32_t source_id) {
-        syslog(LOG_INFO, "Client declined encryption for device %d", source_id);
-        device_encryptions_.erase(source_id);
+    void handle_device_encryption_decline(const std::string& device_id) {
+        syslog(LOG_INFO, "Client declined encryption for device %s", device_id.c_str());
+        device_encryptions_.erase(device_id);
     }
     
-    void send_device_encryption_error(int32_t source_id, const std::string& reason) {
+    void send_device_encryption_error(const std::string& device_id, const std::string& reason) {
         auto error_msg = EncryptionProtocol::Messages::build_encryption_error(reason);
-        send_routed_control_message(source_id, error_msg);
+        send_routed_control_message(device_id, error_msg);
     }
     
     void handle_command(const NoteBytes::Object& msg) {
@@ -614,12 +624,7 @@ private:
     void send_device_list() {
         NoteBytes::Object response;
         response.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_CMD);
-        
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        response.add(NoteMessaging::Keys::SEQUENCE,
-                    NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
-        
+        response.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         response.add(NoteMessaging::Keys::CMD, NoteMessaging::ProtocolMessages::ITEM_LIST);
         
         NoteBytes::Array devices_array;
@@ -635,26 +640,30 @@ private:
     }
     
     void handle_claim_device(const NoteBytes::Object& msg) {
-        std::string device_id = msg.get_string(NoteMessaging::Keys::ITEM_ID, "");
-        int32_t source_id = msg.get_int("source_id", 0);
+        std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, "");
         std::string requested_mode = msg.get_string("mode", "parsed");
         bool request_encryption = msg.get_bool("encryption", false);
         
+        if (device_id.empty()) {
+            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing device_id");
+            return;
+        }
+        
         auto it = available_devices.find(device_id);
         if (it == available_devices.end()) {
-            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_FOUND, "Item not found");
+            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_FOUND, "Device not found");
             return;
         }
         
         auto device_desc = it->second;
         if (!device_desc->available) {
-            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_AVAILABLE, "Item not available");
+            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_AVAILABLE, "Device not available");
             return;
         }
         
         if (!Validation::validate_mode_compatibility(device_desc->device_type, requested_mode)) {
             send_error(NoteMessaging::ErrorCodes::MODE_INCOMPATIBLE, 
-                      "Mode not compatible with item type");
+                      "Mode not compatible with device type");
             return;
         }
         
@@ -662,24 +671,24 @@ private:
         if (!has_any_bits(device_desc->available_capabilities & mode_mask, 
                         cpp_int(1) << requested_mode_bit)) {
             send_error(NoteMessaging::ErrorCodes::MODE_NOT_SUPPORTED, 
-                    "Item does not support requested mode");
+                    "Device does not support requested mode");
             return;
         }
         
-        // Check if encryption requested but not available in daemon
+        // Check if encryption requested but not available
         if (request_encryption && !EncryptionProtocol::EncryptionHandshake::is_available()) {
             send_error(NoteMessaging::ErrorCodes::ENCRYPTION_FAILED,
                      "Encryption requested but not available (OpenSSL not compiled)");
             return;
         }
         
-        for (const auto& kv : device_states) {
-            if (kv.second->device_id == device_id) {
-                send_error(NoteMessaging::ErrorCodes::ALREADY_CLAIMED, "Item already claimed");
-                return;
-            }
+        // Check if already claimed
+        if (device_states.find(device_id) != device_states.end()) {
+            send_error(NoteMessaging::ErrorCodes::ALREADY_CLAIMED, "Device already claimed");
+            return;
         }
 
+        // Validate PID if provided
         if (msg.contains(NoteMessaging::Keys::PID)) {
             int supplied_pid = msg.get_int(NoteMessaging::Keys::PID, 0);
             if (supplied_pid != 0 && supplied_pid != client_pid) {
@@ -689,8 +698,11 @@ private:
             }
         }
 
+        // Create device state using deviceId as identifier
         auto device_state = std::make_shared<DeviceState>(
-            device_id, source_id, client_pid,
+            device_id,           // device_id
+            device_id,           // Use same deviceId for state tracking
+            client_pid,
             device_desc->device_type,
             device_desc->available_capabilities);
            
@@ -713,25 +725,33 @@ private:
             device_state->state.add_flag(DeviceFlags::CLAIMED);
             device_state->state.add_flag(DeviceFlags::STREAMING);
             
-            device_states[source_id] = device_state;
+            // Store device state keyed by deviceId
+            device_states[device_id] = device_state;
             
-            // Start independent streaming thread
+            // Get encryption pointer if encryption is being negotiated
+            EncryptionProtocol::EncryptionHandshake* enc_ptr = nullptr;
+            auto enc_it = device_encryptions_.find(device_id);
+            if (enc_it != device_encryptions_.end()) {
+                enc_ptr = enc_it->second.get();
+            }
+            
+            // Start independent streaming thread with encryption pointer
             auto streaming_thread = std::make_unique<DeviceStreamingThread>(
-                device_desc, device_state, source_id, client_fd);
+                device_desc, device_state, device_id, client_fd, enc_ptr);
             streaming_thread->start();
-            streaming_threads[source_id] = std::move(streaming_thread);
+            streaming_threads[device_id] = std::move(streaming_thread);
             
             send_accept(NoteMessaging::ProtocolMessages::ITEM_CLAIMED);
             
             int current_mode_bit = device_state->get_current_mode_bit();
             const char* currentModeName = Capabilities::Names::get_capability_name(current_mode_bit);
             
-            syslog(LOG_INFO, "Device claimed: %s (sourceId=%d, mode=%s)",
-                device_state->device_id.c_str(), source_id, currentModeName);
+            syslog(LOG_INFO, "Device claimed: %s (deviceId=%s, mode=%s)",
+                device_state->device_id.c_str(), device_id.c_str(), currentModeName);
             
-            // If encryption requested, offer it now (client negotiates per-device)
+            // If encryption requested, offer it now
             if (request_encryption) {
-                offer_device_encryption(source_id);
+                offer_device_encryption(device_id);
             }
         } else {
             send_error(NoteMessaging::ErrorCodes::CLAIM_FAILED, 
@@ -740,19 +760,27 @@ private:
     }
     
     void handle_release_device(const NoteBytes::Object& msg) {
-        int32_t source_id = msg.get_int("source_id", 0);
+        std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, "");
         
-        auto it = device_states.find(source_id);
+        if (device_id.empty()) {
+            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing device_id");
+            return;
+        }
+        
+        auto it = device_states.find(device_id);
         if (it != device_states.end()) {
             auto device_state = it->second;
             if (!ensure_owner(device_state)) return;
 
             // Stop streaming thread
-            auto thread_it = streaming_threads.find(source_id);
+            auto thread_it = streaming_threads.find(device_id);
             if (thread_it != streaming_threads.end()) {
                 thread_it->second->stop();
                 streaming_threads.erase(thread_it);
             }
+
+            // Clear encryption if active
+            device_encryptions_.erase(device_id);
 
             // Release USB resources
             for (auto &kv : available_devices) {
@@ -771,25 +799,33 @@ private:
 
             it->second->release();
             device_states.erase(it);
+            
             send_accept(NoteMessaging::ProtocolMessages::ITEM_RELEASED);
+            syslog(LOG_INFO, "Device released: %s", device_id.c_str());
+        } else {
+            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_FOUND, "Device not found");
         }
     }
     
     void handle_resume(const NoteBytes::Object& msg) {
         int processed_count = msg.get_int(NoteMessaging::Keys::PROCESSED_COUNT, 0);
-        int32_t src = 0;
-        try {
-            src = msg.get_int(NoteMessaging::Keys::SOURCE_ID, 0);
-        } catch (...) {
-            src = 0;
+        std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, "");
+
+        if (device_id.empty()) {
+            syslog(LOG_WARNING, "Resume message missing device_id");
+            return;
         }
 
-        syslog(LOG_INFO, "Client acknowledged %d messages for source %d", processed_count, src);
+        syslog(LOG_DEBUG, "Client acknowledged %d messages for device %s", 
+               processed_count, device_id.c_str());
 
         if (processed_count <= 0) return;
 
-        auto it = device_states.find(src);
-        if (it == device_states.end()) return;
+        auto it = device_states.find(device_id);
+        if (it == device_states.end()) {
+            syslog(LOG_WARNING, "Resume for unknown device: %s", device_id.c_str());
+            return;
+        }
 
         auto device_state = it->second;
         if (!ensure_owner(device_state)) return;
@@ -816,7 +852,6 @@ private:
         }
         
         // Encryption support is purely a daemon capability (OpenSSL availability)
-        // No config override - if OpenSSL is available, encryption is possible
         bool encryption_supported = EncryptionProtocol::EncryptionHandshake::is_available();
         
         for (ssize_t i = 0; i < count; i++) {
@@ -848,6 +883,7 @@ private:
         device_desc->bus_number = libusb_get_bus_number(device);
         device_desc->device_address = libusb_get_device_address(device);
         
+        // Create unique deviceId string: vendor:product-bus-address
         char id_buf[64];
         snprintf(id_buf, sizeof(id_buf), "%04x:%04x-%d-%d",
                 desc.idVendor, desc.idProduct,
@@ -868,6 +904,12 @@ private:
                 if (libusb_get_string_descriptor_ascii(handle, desc.iProduct,
                                                       (unsigned char*)str_buf, sizeof(str_buf)) > 0) {
                     device_desc->product = str_buf;
+                }
+            }
+            if (desc.iSerialNumber) {
+                if (libusb_get_string_descriptor_ascii(handle, desc.iSerialNumber,
+                                                      (unsigned char*)str_buf, sizeof(str_buf)) > 0) {
+                    device_desc->serial_number = str_buf;
                 }
             }
             libusb_close(handle);
@@ -951,16 +993,22 @@ private:
     }
     
     void release_all_devices() {
-        for (auto& [source_id, thread] : streaming_threads) {
+        // Stop all streaming threads
+        for (auto& [device_id, thread] : streaming_threads) {
             thread->stop();
         }
         streaming_threads.clear();
         
-        for (auto& [source_id, state] : device_states) {
+        // Clear all encryption sessions
+        device_encryptions_.clear();
+        
+        // Release all device states
+        for (auto& [device_id, state] : device_states) {
             state->release();
         }
         device_states.clear();
         
+        // Release USB devices
         for (auto& [id, device] : available_devices) {
             if (device->handle) {
                 libusb_release_interface(device->handle, device->interface_number);
@@ -971,32 +1019,32 @@ private:
                 device->handle = nullptr;
             }
         }
+        
+        syslog(LOG_INFO, "Released all devices");
     }
     
-    // Message sending helpers
+    // ===== Message sending helpers =====
+    
     void send_message(const NoteBytes::Object& msg) {
-        // Control messages (no sourceId) - never encrypted
+        // Control messages (no deviceId) - never encrypted
         NoteBytes::Writer writer(client_fd, false);
-        (void) writer.write(msg);
-        (void) writer.flush();
+        writer.write(msg);
+        writer.flush();
     }
     
-    void send_routed_control_message(int32_t source_id, const NoteBytes::Object& msg) {
+    void send_routed_control_message(const std::string& device_id, const NoteBytes::Object& msg) {
         // Routed control messages (encryption negotiation) - NOT encrypted
+        // Format: [STRING:deviceId][OBJECT:msg]
         NoteBytes::Writer writer(client_fd, false);
-        (void) writer.write(NoteBytes::Value(source_id));
-        (void) writer.write(msg);
-        (void) writer.flush();
+        writer.write(NoteBytes::Value(device_id));  // Write deviceId as STRING
+        writer.write(msg);
+        writer.flush();
     }
     
     void send_accept(const std::string& status = "ok") {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ACCEPT);
-        
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        msg.add(NoteMessaging::Keys::SEQUENCE, 
-               NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
+        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::STATUS, status);
         
         send_message(msg);
@@ -1005,25 +1053,19 @@ private:
     void send_error(int code, const std::string& message) {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ERROR);
-        
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        msg.add(NoteMessaging::Keys::SEQUENCE,
-               NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
+        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::ERROR_CODE, code);
         msg.add(NoteMessaging::Keys::MSG, message);
         
         send_message(msg);
+        
+        syslog(LOG_ERR, "Error %d: %s", code, message.c_str());
     }
     
     void send_pong() {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_PONG);
-        
-        uint8_t seq[6];
-        AtomicSequence::get_next(seq);
-        msg.add(NoteMessaging::Keys::SEQUENCE,
-               NoteBytes::Value(seq, 6, NoteBytes::Type::RAW_BYTES));
+        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
         send_message(msg);
     }

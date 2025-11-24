@@ -344,7 +344,7 @@ namespace NoteBytes {
         void add(const char* key, int64_t value) {
             pairs_.emplace_back(key, Value(value));
         }
-        
+
         void add(const char* key, bool value) {
             pairs_.emplace_back(key, Value(value));
         }

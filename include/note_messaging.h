@@ -80,10 +80,10 @@ namespace NoteMessaging{
         // Identity & Routing
         constexpr const char* UUID_128      = "uuid_128";
         // Identity & Routing
+        constexpr const char* DEVICE_ID     = "device_id";
         constexpr const char* ID            = "id";
         constexpr const char* TYPE          = "type";
         constexpr const char* SEQUENCE      = "seq_id";
-        constexpr const char* SOURCE_ID     = "source_id";
         constexpr const char* SESSION_ID    = "session_id";
         constexpr const char* PID           = "pid";
         constexpr const char* RECEIVER_ID   = "receiver_id";
@@ -91,6 +91,7 @@ namespace NoteMessaging{
         constexpr const char* CODE_KEY      = "code";
         constexpr const char* CURRENT_MODE  = "current_mode";
         constexpr const char* STATE_TYPE    = "state_type";
+        constexpr const char* IV            = "iv";
         // Metadata
         constexpr const char* NAME          = "name";
         constexpr const char* TIMESTAMP     = "time_stamp";
@@ -113,7 +114,6 @@ namespace NoteMessaging{
         // Items (Generic resource term)
         constexpr const char* ITEM          = "item";
         constexpr const char* ITEMS         = "items";
-        constexpr const char* ITEM_ID       = "item_id";
         constexpr const char* ITEM_TYPE     = "item_type";
         constexpr const char* ITEM_COUNT    = "item_count";
         constexpr const char* ITEM_PATH     = "item_path";
@@ -246,6 +246,7 @@ namespace NoteMessaging{
         constexpr const char* COMPLETE      = "complete";
         constexpr const char* FAILED        = "failed";
         constexpr const char* CANCELLED     = "cancelled";
+        constexpr const char* ACTIVE        = "active";
     }
 
     // =============================================================================

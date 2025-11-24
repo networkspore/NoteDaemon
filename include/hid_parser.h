@@ -1,6 +1,7 @@
 // include/hid_parser.h
 // HID report parser for converting raw USB reports to parsed events
 // Supports keyboard boot protocol (6KRO standard format)
+// PARSED mode generates NanoVG/GLFW-compatible event sequences
 
 #ifndef HID_PARSER_H
 #define HID_PARSER_H
@@ -10,148 +11,32 @@
 #include <set>
 #include <map>
 #include <memory>
+#include <chrono>
+#include <syslog.h>
 #include "event_bytes.h"
 #include "notebytes.h"
 #include "atomic_sequence.h"
 #include "input_packet.h"
-#include <syslog.h>
+#include "key_code.h"
+
 
 namespace HIDParser {
 
-/**
- * USB HID Usage IDs for keyboard keys
- * From USB HID Usage Tables specification
- */
-namespace KeyboardUsage {
-    // Modifier keys (used in modifier byte)
-    constexpr uint8_t MOD_LEFT_CTRL   = 0x01;
-    constexpr uint8_t MOD_LEFT_SHIFT  = 0x02;
-    constexpr uint8_t MOD_LEFT_ALT    = 0x04;
-    constexpr uint8_t MOD_LEFT_GUI    = 0x08;  // Windows/Super key
-    constexpr uint8_t MOD_RIGHT_CTRL  = 0x10;
-    constexpr uint8_t MOD_RIGHT_SHIFT = 0x20;
-    constexpr uint8_t MOD_RIGHT_ALT   = 0x40;
-    constexpr uint8_t MOD_RIGHT_GUI   = 0x80;
-    
-    // Common key codes (HID usage IDs)
-    constexpr uint8_t KEY_A = 0x04;
-    constexpr uint8_t KEY_Z = 0x1D;
-    constexpr uint8_t KEY_1 = 0x1E;
-    constexpr uint8_t KEY_9 = 0x26;
-    constexpr uint8_t KEY_0 = 0x27;
-    constexpr uint8_t KEY_ENTER = 0x28;
-    constexpr uint8_t KEY_ESCAPE = 0x29;
-    constexpr uint8_t KEY_BACKSPACE = 0x2A;
-    constexpr uint8_t KEY_TAB = 0x2B;
-    constexpr uint8_t KEY_SPACE = 0x2C;
-    constexpr uint8_t KEY_MINUS = 0x2D;
-    constexpr uint8_t KEY_EQUAL = 0x2E;
-    constexpr uint8_t KEY_LEFT_BRACKET = 0x2F;
-    constexpr uint8_t KEY_RIGHT_BRACKET = 0x30;
-    constexpr uint8_t KEY_BACKSLASH = 0x31;
-    constexpr uint8_t KEY_SEMICOLON = 0x33;
-    constexpr uint8_t KEY_APOSTROPHE = 0x34;
-    constexpr uint8_t KEY_GRAVE = 0x35;
-    constexpr uint8_t KEY_COMMA = 0x36;
-    constexpr uint8_t KEY_PERIOD = 0x37;
-    constexpr uint8_t KEY_SLASH = 0x38;
-    constexpr uint8_t KEY_CAPS_LOCK = 0x39;
-    
-    // Function keys
-    constexpr uint8_t KEY_F1 = 0x3A;
-    constexpr uint8_t KEY_F12 = 0x45;
-    
-    // Arrow keys
-    constexpr uint8_t KEY_RIGHT = 0x4F;
-    constexpr uint8_t KEY_LEFT = 0x50;
-    constexpr uint8_t KEY_DOWN = 0x51;
-    constexpr uint8_t KEY_UP = 0x52;
-}
 
 /**
- * Convert HID modifier byte to EventBytes state flags
- */
-inline int hid_modifiers_to_state_flags(uint8_t modifiers) {
-    int flags = 0;
-    
-    if (modifiers & (KeyboardUsage::MOD_LEFT_SHIFT | KeyboardUsage::MOD_RIGHT_SHIFT)) {
-        flags |= EventBytes::StateFlags::MOD_SHIFT;
-    }
-    if (modifiers & (KeyboardUsage::MOD_LEFT_CTRL | KeyboardUsage::MOD_RIGHT_CTRL)) {
-        flags |= EventBytes::StateFlags::MOD_CONTROL;
-    }
-    if (modifiers & (KeyboardUsage::MOD_LEFT_ALT | KeyboardUsage::MOD_RIGHT_ALT)) {
-        flags |= EventBytes::StateFlags::MOD_ALT;
-    }
-    if (modifiers & (KeyboardUsage::MOD_LEFT_GUI | KeyboardUsage::MOD_RIGHT_GUI)) {
-        flags |= EventBytes::StateFlags::MOD_SUPER;
-    }
-    
-    return flags;
-}
-
-/**
- * Convert HID usage ID to character (US layout, basic mapping)
- * Returns 0 if no printable character
- */
-inline int hid_usage_to_char(uint8_t usage, bool shift) {
-    // Letters A-Z
-    if (usage >= KeyboardUsage::KEY_A && usage <= KeyboardUsage::KEY_Z) {
-        int offset = usage - KeyboardUsage::KEY_A;
-        return shift ? ('A' + offset) : ('a' + offset);
-    }
-    
-    // Numbers 1-9, 0
-    if (usage >= KeyboardUsage::KEY_1 && usage <= KeyboardUsage::KEY_9) {
-        if (shift) {
-            // Shifted number row: !@#$%^&*()
-            const char shifted[] = "!@#$%^&*(";
-            return shifted[usage - KeyboardUsage::KEY_1];
-        }
-        return '1' + (usage - KeyboardUsage::KEY_1);
-    }
-    if (usage == KeyboardUsage::KEY_0) {
-        return shift ? ')' : '0';
-    }
-    
-    // Special characters
-    switch (usage) {
-        case KeyboardUsage::KEY_SPACE: return ' ';
-        case KeyboardUsage::KEY_ENTER: return '\n';
-        case KeyboardUsage::KEY_TAB: return '\t';
-        case KeyboardUsage::KEY_MINUS: return shift ? '_' : '-';
-        case KeyboardUsage::KEY_EQUAL: return shift ? '+' : '=';
-        case KeyboardUsage::KEY_LEFT_BRACKET: return shift ? '{' : '[';
-        case KeyboardUsage::KEY_RIGHT_BRACKET: return shift ? '}' : ']';
-        case KeyboardUsage::KEY_BACKSLASH: return shift ? '|' : '\\';
-        case KeyboardUsage::KEY_SEMICOLON: return shift ? ':' : ';';
-        case KeyboardUsage::KEY_APOSTROPHE: return shift ? '"' : '\'';
-        case KeyboardUsage::KEY_GRAVE: return shift ? '~' : '`';
-        case KeyboardUsage::KEY_COMMA: return shift ? '<' : ',';
-        case KeyboardUsage::KEY_PERIOD: return shift ? '>' : '.';
-        case KeyboardUsage::KEY_SLASH: return shift ? '?' : '/';
-        default: return 0;
-    }
-}
-
-/**
- * Convert HID usage ID to a virtual key code
- * This is a simple 1:1 mapping for now (HID usage = virtual key)
- */
-inline int hid_usage_to_virtual_key(uint8_t usage) {
-    return usage;
-}
-
-/**
- * Get scancode for HID usage (simplified - use usage as scancode)
- */
-inline int hid_usage_to_scancode(uint8_t usage) {
-    return usage;
-}
-
-/**
- * Keyboard HID Report Parser
- * Handles standard USB keyboard boot protocol (8-byte reports)
+ * Keyboard HID Report Parser - PARSED MODE
+ * Generates NanoVG/GLFW-compatible event sequences:
+ * 
+ * Normal key press sequence:
+ *   1. EVENT_KEY_DOWN (physical key, scancode, modifiers)
+ *   2. EVENT_KEY_CHAR_MODS (Unicode codepoint, modifiers) [if printable]
+ * 
+ * Key repeat (while held):
+ *   1. EVENT_KEY_REPEAT (physical key, scancode, modifiers)
+ *   2. EVENT_KEY_CHAR_MODS (Unicode codepoint, modifiers) [if printable]
+ * 
+ * Key release:
+ *   1. EVENT_KEY_UP (physical key, scancode, modifiers)
  * 
  * Boot Protocol Format:
  * Byte 0: Modifier keys bitmap
@@ -160,9 +45,22 @@ inline int hid_usage_to_scancode(uint8_t usage) {
  */
 class KeyboardParser {
 private:
-    std::set<uint8_t> pressed_keys_;     // Currently pressed keys
-    uint8_t last_modifiers_ = 0;          // Last modifier state
-    bool caps_lock_state_ = false;        // Caps lock LED state
+    std::set<uint8_t> pressed_keys_;           // Currently pressed keys
+    uint8_t last_modifiers_ = 0;                // Last modifier state
+    bool caps_lock_state_ = false;              // Caps lock LED state
+    
+    // Key repeat tracking
+    struct KeyRepeatState {
+        uint8_t usage = 0;
+        std::chrono::steady_clock::time_point press_time;
+        std::chrono::steady_clock::time_point last_repeat;
+        bool repeating = false;
+    };
+    std::map<uint8_t, KeyRepeatState> repeat_states_;
+    
+    // Repeat timing (matching typical OS behavior)
+    static constexpr int REPEAT_DELAY_MS = 500;   // Initial delay before repeat
+    static constexpr int REPEAT_RATE_MS = 33;      // ~30 Hz repeat rate
     
     InputPacket::Factory* factory_;
     
@@ -177,55 +75,66 @@ public:
     std::vector<std::vector<uint8_t>> parse_report(const uint8_t* data, size_t len) {
         std::vector<std::vector<uint8_t>> events;
         
-        // Validate report length (must be at least 8 bytes for boot protocol)
+        // Validate report length
         if (len < 8) {
             syslog(LOG_WARNING, "Invalid keyboard report length: %zu", len);
             return events;
         }
         
         uint8_t modifiers = data[0];
-        // data[1] is reserved
         
         // Extract pressed keys from report (bytes 2-7)
         std::set<uint8_t> current_keys;
         for (size_t i = 2; i < 8 && i < len; i++) {
             uint8_t usage = data[i];
-            if (usage != 0x00) {  // 0x00 = no key
+            if (usage != 0x00 && usage != 0x01) {  // 0x00 = no key, 0x01 = error rollover
                 current_keys.insert(usage);
             }
         }
         
         // Convert modifiers to state flags
-        int state_flags = hid_modifiers_to_state_flags(modifiers);
+        int state_flags = KeyCode::hid_modifiers_to_state_flags(modifiers);
         
-        // Check for caps lock state
+        // Apply caps lock flag
         if (caps_lock_state_) {
             state_flags |= EventBytes::StateFlags::MOD_CAPS_LOCK;
         }
         
-        // Detect modifier changes (generate modifier key events)
+        // 1. Handle modifier key changes (generate KEY_DOWN/KEY_UP for modifier keys)
         if (modifiers != last_modifiers_) {
             generate_modifier_events(events, last_modifiers_, modifiers, state_flags);
         }
         
-        // Detect released keys
+        // 2. Handle released keys
         for (uint8_t old_key : pressed_keys_) {
             if (current_keys.find(old_key) == current_keys.end()) {
                 // Key was released
                 generate_key_up_event(events, old_key, state_flags);
+                repeat_states_.erase(old_key);
             }
         }
         
-        // Detect newly pressed keys
+        // 3. Handle newly pressed keys
         for (uint8_t new_key : current_keys) {
             if (pressed_keys_.find(new_key) == pressed_keys_.end()) {
                 // Key was pressed
                 generate_key_down_event(events, new_key, state_flags);
                 
-                // Check for caps lock toggle
-                if (new_key == KeyboardUsage::KEY_CAPS_LOCK) {
+                // Initialize repeat state
+                KeyRepeatState repeat;
+                repeat.usage = new_key;
+                repeat.press_time = std::chrono::steady_clock::now();
+                repeat.last_repeat = repeat.press_time;
+                repeat.repeating = false;
+                repeat_states_[new_key] = repeat;
+                
+                // Handle caps lock toggle
+                if (new_key == KeyCode::KEY_CAPS_LOCK) {
                     caps_lock_state_ = !caps_lock_state_;
                 }
+            } else {
+                // Key is still pressed - check for repeat
+                generate_key_repeat_if_needed(events, new_key, state_flags);
             }
         }
         
@@ -237,54 +146,104 @@ public:
     }
     
     /**
-     * Reset parser state (call when device is released)
+     * Reset parser state
      */
     void reset() {
-        // Generate key up events for all currently pressed keys
         pressed_keys_.clear();
+        repeat_states_.clear();
         last_modifiers_ = 0;
         caps_lock_state_ = false;
     }
     
 private:
     /**
-     * Generate key down event + optional character event
+     * Generate KEY_DOWN + KEY_CHAR_MODS sequence
      */
     void generate_key_down_event(std::vector<std::vector<uint8_t>>& events,
                                  uint8_t usage, int state_flags) {
-        int virtual_key = hid_usage_to_virtual_key(usage);
-        int scancode = hid_usage_to_scancode(usage);
+        int virtual_key = KeyCode::hid_usage_to_virtual_key(usage);
+        int scancode = KeyCode::hid_usage_to_scancode(usage);
         
-        // Generate KEY_DOWN event
+        // 1. Generate KEY_DOWN event (physical key press)
         auto key_down = factory_->create_key_down(virtual_key, scancode, state_flags);
         events.push_back(key_down);
         
-        // Generate KEY_CHAR event if key produces a character
-        bool shift = (state_flags & EventBytes::StateFlags::MOD_SHIFT) != 0;
-        bool caps = caps_lock_state_;
-        
-        // Apply caps lock to letters only
-        if (caps && usage >= KeyboardUsage::KEY_A && usage <= KeyboardUsage::KEY_Z) {
-            shift = !shift;  // Invert shift for letters when caps is on
-        }
-        
-        int codepoint = hid_usage_to_char(usage, shift);
-        if (codepoint != 0) {
-            auto key_char = factory_->create_key_char(codepoint, state_flags);
-            events.push_back(key_char);
+        // 2. Generate KEY_CHAR_MODS event if key produces a character
+        if ( KeyCode::is_printable_key(usage)) {
+            int codepoint = calculate_codepoint(usage, state_flags);
+            if (codepoint != 0) {
+                // Use EVENT_KEY_CHAR_MODS which includes modifier flags
+                auto key_char = factory_->create_key_char_mods(codepoint, state_flags);
+                events.push_back(key_char);
+            }
         }
     }
     
     /**
-     * Generate key up event
+     * Generate KEY_UP event
      */
     void generate_key_up_event(std::vector<std::vector<uint8_t>>& events,
                                uint8_t usage, int state_flags) {
-        int virtual_key = hid_usage_to_virtual_key(usage);
-        int scancode = hid_usage_to_scancode(usage);
+        int virtual_key =  KeyCode::hid_usage_to_virtual_key(usage);
+        int scancode =  KeyCode::hid_usage_to_scancode(usage);
         
         auto key_up = factory_->create_key_up(virtual_key, scancode, state_flags);
         events.push_back(key_up);
+    }
+    
+    /**
+     * Generate KEY_REPEAT + KEY_CHAR_MODS sequence (if repeat timing met)
+     */
+    void generate_key_repeat_if_needed(std::vector<std::vector<uint8_t>>& events,
+                                       uint8_t usage, int state_flags) {
+        auto it = repeat_states_.find(usage);
+        if (it == repeat_states_.end()) {
+            return;
+        }
+        
+        auto& repeat = it->second;
+        auto now = std::chrono::steady_clock::now();
+        
+        // Calculate time since press and last repeat
+        auto time_since_press = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - repeat.press_time).count();
+        auto time_since_repeat = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - repeat.last_repeat).count();
+        
+        // Check if we should generate repeat
+        bool should_repeat = false;
+        if (!repeat.repeating) {
+            // Initial repeat after delay
+            if (time_since_press >= REPEAT_DELAY_MS) {
+                should_repeat = true;
+                repeat.repeating = true;
+            }
+        } else {
+            // Continuous repeat at rate
+            if (time_since_repeat >= REPEAT_RATE_MS) {
+                should_repeat = true;
+            }
+        }
+        
+        if (should_repeat) {
+            int virtual_key =  KeyCode::hid_usage_to_virtual_key(usage);
+            int scancode =  KeyCode::hid_usage_to_scancode(usage);
+            
+            // 1. Generate KEY_REPEAT event
+            auto key_repeat = factory_->create_key_repeat(virtual_key, scancode, state_flags);
+            events.push_back(key_repeat);
+            
+            // 2. Generate KEY_CHAR_MODS event if printable
+            if (KeyCode::is_printable_key(usage)) {
+                int codepoint = calculate_codepoint(usage, state_flags);
+                if (codepoint != 0) {
+                    auto key_char = factory_->create_key_char_mods(codepoint, state_flags);
+                    events.push_back(key_char);
+                }
+            }
+            
+            repeat.last_repeat = now;
+        }
     }
     
     /**
@@ -293,19 +252,19 @@ private:
     void generate_modifier_events(std::vector<std::vector<uint8_t>>& events,
                                   uint8_t old_mods, uint8_t new_mods,
                                   int state_flags) {
-        // Check each modifier bit
+        // Map modifier bits to HID usage IDs
         const struct {
             uint8_t bit;
             uint8_t usage;
         } modifiers[] = {
-            {KeyboardUsage::MOD_LEFT_CTRL, 0xE0},
-            {KeyboardUsage::MOD_LEFT_SHIFT, 0xE1},
-            {KeyboardUsage::MOD_LEFT_ALT, 0xE2},
-            {KeyboardUsage::MOD_LEFT_GUI, 0xE3},
-            {KeyboardUsage::MOD_RIGHT_CTRL, 0xE4},
-            {KeyboardUsage::MOD_RIGHT_SHIFT, 0xE5},
-            {KeyboardUsage::MOD_RIGHT_ALT, 0xE6},
-            {KeyboardUsage::MOD_RIGHT_GUI, 0xE7},
+            {KeyCode::MOD_LEFT_CTRL,KeyCode::KEY_LEFT_CTRL_USAGE},
+            {KeyCode::MOD_LEFT_SHIFT,KeyCode::KEY_LEFT_SHIFT_USAGE},
+            {KeyCode::MOD_LEFT_ALT,KeyCode::KEY_LEFT_ALT_USAGE},
+            {KeyCode::MOD_LEFT_GUI,KeyCode::KEY_LEFT_GUI_USAGE},
+            {KeyCode::MOD_RIGHT_CTRL,KeyCode::KEY_RIGHT_CTRL_USAGE},
+            {KeyCode::MOD_RIGHT_SHIFT,KeyCode::KEY_RIGHT_SHIFT_USAGE},
+            {KeyCode::MOD_RIGHT_ALT,KeyCode::KEY_RIGHT_ALT_USAGE},
+            {KeyCode::MOD_RIGHT_GUI,KeyCode::KEY_RIGHT_GUI_USAGE},
         };
         
         for (const auto& mod : modifiers) {
@@ -314,22 +273,39 @@ private:
             
             if (is_pressed && !was_pressed) {
                 // Modifier pressed
-                generate_key_down_event(events, mod.usage, state_flags);
+                int virtual_key = KeyCode::hid_usage_to_virtual_key(mod.usage);
+                int scancode = KeyCode::hid_usage_to_scancode(mod.usage);
+                auto key_down = factory_->create_key_down(virtual_key, scancode, state_flags);
+                events.push_back(key_down);
             } else if (!is_pressed && was_pressed) {
                 // Modifier released
-                generate_key_up_event(events, mod.usage, state_flags);
+                int virtual_key = KeyCode::hid_usage_to_virtual_key(mod.usage);
+                int scancode = KeyCode::hid_usage_to_scancode(mod.usage);
+                auto key_up = factory_->create_key_up(virtual_key, scancode, state_flags);
+                events.push_back(key_up);
             }
         }
+    }
+    
+    /**
+     * Calculate codepoint with caps lock and shift handling
+     */
+    int calculate_codepoint(uint8_t usage, int state_flags) {
+        bool shift = (state_flags & EventBytes::StateFlags::MOD_SHIFT) != 0;
+        bool caps = caps_lock_state_;
+        
+        // Apply caps lock to letters only (inverts shift)
+        if (caps && usage >=KeyCode::KEY_A && usage <=KeyCode::KEY_Z) {
+            shift = !shift;
+        }
+        
+        return KeyCode::hid_usage_to_codepoint(usage, shift);
     }
 };
 
 /**
- * Mouse HID Report Parser (placeholder for future implementation)
+ * Mouse HID Report Parser
  * Standard boot protocol: 4-byte reports
- * Byte 0: Button states
- * Byte 1: X movement (signed)
- * Byte 2: Y movement (signed)
- * Byte 3: Wheel movement (signed)
  */
 class MouseParser {
 private:
@@ -352,7 +328,7 @@ public:
         int8_t dy = static_cast<int8_t>(data[2]);
         int8_t wheel = static_cast<int8_t>(data[3]);
         
-        // Convert button states to state flags
+        // Convert button states to flags
         int state_flags = 0;
         if (buttons & 0x01) state_flags |= EventBytes::StateFlags::MOUSE_BUTTON_1;
         if (buttons & 0x02) state_flags |= EventBytes::StateFlags::MOUSE_BUTTON_2;
@@ -395,7 +371,7 @@ public:
 };
 
 /**
- * Generic HID parser that routes to specific device type parsers
+ * Generic HID parser dispatcher
  */
 class HIDParser {
 private:
@@ -414,9 +390,6 @@ public:
         }
     }
     
-    /**
-     * Parse HID report and return vector of event packets
-     */
     std::vector<std::vector<uint8_t>> parse_report(const uint8_t* data, size_t len) {
         if (keyboard_parser_) {
             return keyboard_parser_->parse_report(data, len);
@@ -424,13 +397,9 @@ public:
             return mouse_parser_->parse_report(data, len);
         }
         
-        // Unknown device type - return empty
         return std::vector<std::vector<uint8_t>>();
     }
     
-    /**
-     * Reset parser state
-     */
     void reset() {
         if (keyboard_parser_) {
             keyboard_parser_->reset();
