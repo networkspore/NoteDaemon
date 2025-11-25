@@ -39,6 +39,28 @@ less install.sh  # Review the script
 sudo bash install.sh
 ```
 
+Command to download and install 
+```
+curl -fsSL https://raw.githubusercontent.com/networkspore/NoteDaemon/master/download-install.sh -o install.sh
+less install.sh
+sudo bash install.sh
+```
+
+# Setup script
+```
+setup-netnotes.sh
+```
+
+# Build script
+```
+sudo bash build.sh
+```
+
+# build and install
+```
+sudo bash build.sh --install
+```
+
 Scripts: 
 
 [Download install](download-install.sh) 
