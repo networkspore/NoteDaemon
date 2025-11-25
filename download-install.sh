@@ -12,10 +12,10 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO_URL="https://github.com/networkspore/NoteDaemon/archive/refs/tags/v1.0.0-beta.1.tar.gz"
-TAG_VERSION="v1.0.0-beta.1"
+REPO_URL="https://github.com/networkspore/NoteDaemon/archive/refs/tags/v1.0.0-beta.2.tar.gz"
+TAG_VERSION="v1.0.0-beta.2"
 WORK_DIR="/tmp/notedaemon-install"
-EXTRACTED_DIR="NoteDaemon-1.0.0-beta.1"
+EXTRACTED_DIR="NoteDaemon"
 
 # Functions
 print_status() {
