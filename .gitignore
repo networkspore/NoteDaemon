@@ -1,0 +1,110 @@
+# =========================
+# Build artifacts
+# =========================
+build/
+bin/
+out/
+dist/
+cmake-build*/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# =========================
+# Object files & libraries
+# =========================
+*.o
+*.obj
+*.lo
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# =========================
+# Dependency files
+# =========================
+*.d
+*.depend
+
+# =========================
+# CMake
+# =========================
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+
+# =========================
+# Meson
+# =========================
+meson-private/
+meson-logs/
+meson-info/
+builddir/
+
+# =========================
+# Ninja
+# =========================
+.ninja_deps
+.ninja_log
+
+# =========================
+# Autotools
+# =========================
+configure
+config.log
+config.status
+autom4te.cache/
+Makefile
+Makefile.in
+aclocal.m4
+libtool
+ltmain.sh
+m4/
+
+# =========================
+# IDE / Editor files
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.user
+*.user.*
+*.sln
+*.vcxproj*
+*.filters
+*.cbp
+
+# =========================
+# OS junk
+# =========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =========================
+# Code coverage / profiling
+# =========================
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# =========================
+# Sanitizers / crash dumps
+# =========================
+*.core
+core
+vgcore.*
