@@ -13,6 +13,7 @@
 #include <memory>
 #include <syslog.h>
 #include <vector>
+#include <string_view>
 
 namespace EncryptionProtocol {
 
@@ -277,7 +278,7 @@ public:
         const std::string& cipher = "aes-256-gcm"
     ) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ENCRYPTION_OFFER);
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ENCRYPTION_OFFER);
         msg.add(NoteMessaging::Keys::SEQUENCE,AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::CIPHER, cipher);
         msg.add(NoteMessaging::Keys::PUBLIC_KEY, 
@@ -333,7 +334,7 @@ public:
         const std::vector<uint8_t>& iv
     ) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ENCRYPTION_READY);
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ENCRYPTION_READY);
         msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
         msg.add(NoteMessaging::Keys::IV, 
@@ -356,7 +357,7 @@ public:
      */
     static NoteBytes::Object build_encryption_decline(const std::string& reason) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ENCRYPTION_DECLINE);
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ENCRYPTION_DECLINE);
         msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::MSG, reason);
         
@@ -377,7 +378,7 @@ public:
      */
     static NoteBytes::Object build_encryption_error(const std::string& reason) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ERROR);
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
         msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::ERROR_CODE,NoteMessaging::ErrorCodes::ENCRYPTION_FAILED);
         msg.add(NoteMessaging::Keys::MSG, reason);

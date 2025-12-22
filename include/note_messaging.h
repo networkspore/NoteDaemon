@@ -82,7 +82,7 @@ namespace NoteMessaging{
         // Identity & Routing
         constexpr const char* DEVICE_ID     = "device_id";
         constexpr const char* ID            = "id";
-        constexpr const char* TYPE          = "type";
+        constexpr const char* EVENT          = "event";
         constexpr const char* SEQUENCE      = "seq_id";
         constexpr const char* SESSION_ID    = "session_id";
         constexpr const char* PID           = "pid";

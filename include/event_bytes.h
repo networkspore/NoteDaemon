@@ -6,67 +6,68 @@
 #define EVENT_BYTES_H
 
 #include <cstdint>
+#include <string_view>
 
 namespace EventBytes {
 
    
-// Mouse events (1-14)
-constexpr uint8_t EVENT_MOUSE_MOVE_RELATIVE = 1;
-constexpr uint8_t EVENT_MOUSE_BUTTON_DOWN = 2;
-constexpr uint8_t EVENT_MOUSE_BUTTON_UP = 3;
-constexpr uint8_t EVENT_MOUSE_CLICK = 4;
-constexpr uint8_t EVENT_MOUSE_DOUBLE_CLICK = 5;
-constexpr uint8_t EVENT_SCROLL = 6;
-constexpr uint8_t EVENT_MOUSE_ENTER = 7;
-constexpr uint8_t EVENT_MOUSE_EXIT = 8;
-constexpr uint8_t EVENT_MOUSE_DRAG_START = 9;
-constexpr uint8_t EVENT_MOUSE_DRAG = 10;
-constexpr uint8_t EVENT_MOUSE_DRAG_END = 11;
-constexpr uint8_t EVENT_MOUSE_MOVE_ABSOLUTE = 12;
+// ===== MOUSE EVENTS =====
+    constexpr std::string_view EVENT_MOUSE_MOVE_RELATIVE  = "mouse_move_rel";
+    constexpr std::string_view EVENT_MOUSE_BUTTON_DOWN    = "mouse_button_down";
+    constexpr std::string_view EVENT_MOUSE_BUTTON_UP      = "mouse_button_up";
+    constexpr std::string_view EVENT_MOUSE_CLICK          = "mouse_click";
+    constexpr std::string_view EVENT_MOUSE_DOUBLE_CLICK   = "mouse_double_click";
+    constexpr std::string_view EVENT_SCROLL               = "mouse_scroll";
+    constexpr std::string_view EVENT_MOUSE_ENTER           = "mouse_enter";
+    constexpr std::string_view EVENT_MOUSE_EXIT            = "mouse_exit";
+    constexpr std::string_view EVENT_MOUSE_DRAG_START      = "mouse_drag_start";
+    constexpr std::string_view EVENT_MOUSE_DRAG            = "mouse_drag";
+    constexpr std::string_view EVENT_MOUSE_DRAG_END        = "mouse_drag_end";
+    constexpr std::string_view EVENT_MOUSE_MOVE_ABSOLUTE   = "mouse_move_abs";
 
+    // ===== KEYBOARD EVENTS =====
+    constexpr std::string_view EVENT_KEY_DOWN       = "key_down";
+    constexpr std::string_view EVENT_KEY_UP         = "key_up";
+    constexpr std::string_view EVENT_KEY_REPEAT     = "key_repeat";
+    constexpr std::string_view EVENT_KEY_CHAR       = "key_char";
+    constexpr std::string_view EVENT_KEY_CHAR_MODS  = "key_char_mods";
 
-// Keyboard events (15-19)
-constexpr uint8_t EVENT_KEY_DOWN = 15;
-constexpr uint8_t EVENT_KEY_UP = 16;
-constexpr uint8_t EVENT_KEY_REPEAT = 17;
-constexpr uint8_t EVENT_KEY_CHAR = 18;
-constexpr uint8_t EVENT_KEY_CHAR_MODS = 19;
+    // ===== CONTAINER / WINDOW EVENTS =====
+    constexpr std::string_view EVENT_FOCUS_GAINED        = "container_focus_gained";
+    constexpr std::string_view EVENT_FOCUS_LOST          = "container_focus_lost";
 
-// Focus events (50-51)
-constexpr uint8_t EVENT_FOCUS_GAINED = 50;
-constexpr uint8_t EVENT_FOCUS_LOST = 51;
+    constexpr std::string_view EVENT_WINDOW_RESIZE       = "container_resize";
+    constexpr std::string_view EVENT_WINDOW_MOVE         = "container_move";
+    constexpr std::string_view EVENT_WINDOW_CLOSE        = "container_close";
+    constexpr std::string_view EVENT_FRAMEBUFFER_RESIZE  = "container_resize";
 
-// Window events (52-55)
-constexpr uint8_t EVENT_WINDOW_RESIZE = 52;
-constexpr uint8_t EVENT_WINDOW_MOVE = 53;
-constexpr uint8_t EVENT_WINDOW_CLOSE = 54;
-constexpr uint8_t EVENT_FRAMEBUFFER_RESIZE = 55;
+    // ===== SPECIAL INPUT =====
+    constexpr std::string_view EVENT_RAW_HID = "raw_hid";
 
-constexpr uint8_t EVENT_RAW_HID        = 60;
+    // ===== ENCRYPTION / PROTOCOL =====
+    constexpr std::string_view TYPE_ENCRYPTION_OFFER   = "encryption_offer";
+    constexpr std::string_view TYPE_ENCRYPTION_ACCEPT  = "encryption_accept";
+    constexpr std::string_view TYPE_ENCRYPTION_READY   = "encryption_ready";
+    constexpr std::string_view TYPE_ENCRYPTED          = "encrypted";
+    constexpr std::string_view TYPE_ENCRYPTION_DECLINE = "encryption_decline";
 
-constexpr uint8_t TYPE_ENCRYPTION_OFFER   = 225;
-constexpr uint8_t TYPE_ENCRYPTION_ACCEPT  = 226;
-constexpr uint8_t TYPE_ENCRYPTION_READY   = 227;
-constexpr uint8_t TYPE_ENCRYPTED          = 228;
-constexpr uint8_t TYPE_ENCRYPTION_DECLINE = 229;
+    // ===== STATE CHANGE EVENTS =====
+    constexpr std::string_view EVENT_RELEASE = "release";
+    constexpr std::string_view EVENT_REMOVED = "removed";
+    constexpr std::string_view EVENT_CHANGED = "changed";
+    constexpr std::string_view EVENT_CHECKED = "checked";
+    constexpr std::string_view EVENT_UPDATED = "updated";
+    constexpr std::string_view EVENT_ADDED   = "added";
 
-// State change events (242-247)
-constexpr uint8_t EVENT_RELEASE = 242;
-constexpr uint8_t EVENT_REMOVED = 243;
-constexpr uint8_t EVENT_CHANGED = 244;
-constexpr uint8_t EVENT_CHECKED = 245;
-constexpr uint8_t EVENT_UPDATED = 246;
-constexpr uint8_t EVENT_ADDED = 247;
-
-// Protocol control messages (248-255)
-constexpr uint8_t TYPE_ERROR = 248;
-constexpr uint8_t TYPE_DISCONNECTED = 249;
-constexpr uint8_t TYPE_PONG = 250;
-constexpr uint8_t TYPE_PING = 251;
-constexpr uint8_t TYPE_ACCEPT = 252;       // trust ack
-constexpr uint8_t TYPE_HELLO = 253;        // identity bootstrap
-constexpr uint8_t TYPE_CMD = 254;
-constexpr uint8_t TYPE_SHUTDOWN = 255;
+    // ===== PROTOCOL CONTROL =====
+    constexpr std::string_view TYPE_ERROR        = "error";
+    constexpr std::string_view TYPE_DISCONNECTED = "disconnected";
+    constexpr std::string_view TYPE_PONG         = "pong";
+    constexpr std::string_view TYPE_PING         = "ping";
+    constexpr std::string_view TYPE_ACCEPT       = "accept";
+    constexpr std::string_view TYPE_HELLO        = "hello";
+    constexpr std::string_view TYPE_CMD          = "cmd";
+    constexpr std::string_view TYPE_SHUTDOWN     = "shutdown";
 
 inline bool requires_encryption(uint8_t type) {
     // Only event messages (0x30+) should be encrypted

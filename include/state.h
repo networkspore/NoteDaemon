@@ -480,7 +480,7 @@ namespace State {
         const std::string& state_type  // "client" or "device"
     ) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, "state_update");
+        msg.add(NoteMessaging::Keys::EVENT, "state_update");
         msg.add(NoteMessaging::Keys::STATE_TYPE, state_type);
         msg.add(NoteMessaging::Keys::ID, sm.get_id());
         msg.add(NoteMessaging::Keys::STATE, sm.get_state());

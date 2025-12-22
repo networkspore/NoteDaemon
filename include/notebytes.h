@@ -10,6 +10,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <boost/multiprecision/cpp_int.hpp>
@@ -77,6 +78,9 @@ namespace NoteBytes {
         Value(const char* str) 
             : data_(str, str + strlen(str)), type_(Type::STRING) {}
         
+        Value(std::string_view sv)
+            : data_(sv.begin(), sv.end()), type_(Type::STRING) {}
+
         // Integer constructor
         Value(int32_t val) : type_(Type::INTEGER) {
             data_.resize(4);
@@ -293,6 +297,9 @@ namespace NoteBytes {
         Pair(const char* key, const Value& value)
             : key_(key), value_(value) {}
         
+        Pair(std::string_view key, const Value& value)
+            : key_(Value(key)), value_(value) {}
+        
         const Value& key() const { return key_; }
         const Value& value() const { return value_; }
         
@@ -323,49 +330,20 @@ namespace NoteBytes {
 
     public:
         Object() = default;
-        
-        // Add methods with various key types
-        void add(const char* key, const Value& value) {
-            pairs_.emplace_back(key, value);
+        template <typename T>
+        void add(std::string_view key, T&& value) {
+            pairs_.emplace_back(key, Value(std::forward<T>(value)));
         }
-        
-        void add(const std::string& key, const Value& value) {
-            pairs_.emplace_back(key, value);
-        }
-        
-        void add(const char* key, const std::string& value) {
-            pairs_.emplace_back(key, Value(value));
-        }
-        
-        void add(const char* key, int32_t value) {
-            pairs_.emplace_back(key, Value(value));
-        }
-        
-        void add(const char* key, int64_t value) {
-            pairs_.emplace_back(key, Value(value));
-        }
-
-        void add(const char* key, bool value) {
-            pairs_.emplace_back(key, Value(value));
-        }
-        
-        void add(const char* key, double value) {
-            pairs_.emplace_back(key, Value(value));
-        }
-        
-        void add(const char* key, uint8_t value) {
-            pairs_.emplace_back(key, Value(value));
-        }
-
-        void add(const char* key, cpp_int value) {
-            pairs_.emplace_back(key, Value(value));
-        }
-        
         void add(const Pair& pair) {
             pairs_.push_back(pair);
         }
+
+        void add(std::string_view key, const Value& value) {
+            pairs_.emplace_back(key, value);
+        }
+      /*
         
-        // Get methods
+         Get methods
         const Value* get(const std::string& key) const {
             for (const auto& pair : pairs_) {
                 if (pair.key().as_string() == key) {
@@ -373,8 +351,19 @@ namespace NoteBytes {
                 }
             }
             return nullptr;
+        }*/
+
+        const Value* get(std::string_view key) const {
+            for (const auto& pair : pairs_) {
+                if (pair.key().as_string() == key) {
+                    return &pair.value();
+                }
+            }
+            return nullptr;
         }
+
         
+                
         std::string get_string(const std::string& key, const std::string& default_val = "") const {
             const Value* val = get(key);
             return val ? val->as_string() : default_val;

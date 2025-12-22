@@ -66,7 +66,7 @@ public:
         
         // Always include these fields
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
-        packet.add(NoteMessaging::Keys::TYPE, event_type);
+        packet.add(NoteMessaging::Keys::EVENT, event_type);
         
         // Add atomic sequence (8 bytes LONG)
         packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
@@ -229,7 +229,7 @@ public:
     std::vector<uint8_t> create_error(int error_code, const std::string& message) {
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
-        packet.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ERROR);
+        packet.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
         packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         packet.add(NoteMessaging::Keys::ERROR_CODE, error_code);
         packet.add(NoteMessaging::Keys::MSG, message);
@@ -240,7 +240,7 @@ public:
     std::vector<uint8_t> create_accept(const std::string& status = "ok") {
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
-        packet.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ACCEPT);
+        packet.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
         
        
         packet.add(NoteMessaging::Keys::SEQUENCE, NoteBytes::Value(AtomicSequence64::get_next()));
@@ -255,7 +255,7 @@ public:
     std::vector<uint8_t> create_encrypted(const uint8_t* ciphertext, size_t len) {
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
-        packet.add(NoteMessaging::Keys::TYPE, EventBytes::EVENT_KEY_DOWN); // Type embedded in encrypted data
+        packet.add(NoteMessaging::Keys::EVENT, EventBytes::EVENT_KEY_DOWN); // Type embedded in encrypted data
         packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         packet.add(NoteMessaging::Keys::ENCRYPTION, true);
         packet.add(NoteMessaging::Keys::CIPHER, 

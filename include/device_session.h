@@ -309,7 +309,7 @@ private:
         } else {
             // RAW_MODE: send raw HID data
             NoteBytes::Object event_obj;
-            event_obj.add(NoteMessaging::Keys::TYPE, EventBytes::EVENT_RAW_HID);
+            event_obj.add(NoteMessaging::Keys::EVENT, EventBytes::EVENT_RAW_HID);
             event_obj.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
     
             NoteBytes::Array payload;
@@ -325,7 +325,7 @@ private:
     
     void send_synthetic_event() {
         NoteBytes::Object event_obj;
-        event_obj.add(NoteMessaging::Keys::TYPE, EventBytes::EVENT_KEY_DOWN);
+        event_obj.add(NoteMessaging::Keys::EVENT, EventBytes::EVENT_KEY_DOWN);
         event_obj.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
         NoteBytes::Array payload;
@@ -433,7 +433,7 @@ private:
      * Handle control messages (no deviceId) - NEVER encrypted
      */
     void handle_control_message(const NoteBytes::Object& msg) {
-        uint8_t msg_type = msg.get_byte(NoteMessaging::Keys::TYPE);
+        uint8_t msg_type = msg.get_byte(NoteMessaging::Keys::EVENT);
         
         switch (msg_type) {
             case EventBytes::TYPE_CMD:
@@ -482,7 +482,7 @@ private:
                 routed.message.data().data(),
                 routed.message.data().size());
             
-            uint8_t msg_type = msg.get_byte(NoteMessaging::Keys::TYPE);
+            uint8_t msg_type = msg.get_byte(NoteMessaging::Keys::EVENT);
             
             // Handle encryption negotiation messages
             if (msg_type == EventBytes::TYPE_ENCRYPTION_ACCEPT) {
@@ -516,7 +516,7 @@ private:
             NoteBytes::Object event_obj = NoteBytes::Object::deserialize(
                 plaintext.data(), plaintext.size());
             
-            uint8_t event_type = event_obj.get_byte(NoteMessaging::Keys::TYPE);
+            uint8_t event_type = event_obj.get_byte(NoteMessaging::Keys::EVENT);
             syslog(LOG_DEBUG, "Received encrypted event type %d for device %s", 
                    event_type, device_id.c_str());
         }
@@ -623,7 +623,7 @@ private:
     
     void send_device_list() {
         NoteBytes::Object response;
-        response.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_CMD);
+        response.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_CMD);
         response.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         response.add(NoteMessaging::Keys::CMD, NoteMessaging::ProtocolMessages::ITEM_LIST);
         
@@ -1042,7 +1042,7 @@ private:
     
     void send_accept(const std::string& status = "ok") {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ACCEPT);
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
         msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::STATUS, status);
         
@@ -1051,7 +1051,7 @@ private:
     
     void send_error(int code, const std::string& message) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_ERROR);
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
         msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::ERROR_CODE, code);
         msg.add(NoteMessaging::Keys::MSG, message);
@@ -1063,7 +1063,7 @@ private:
     
     void send_pong() {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::TYPE, EventBytes::TYPE_PONG);
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_PONG);
         msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
         send_message(msg);
