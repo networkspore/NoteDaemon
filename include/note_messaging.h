@@ -1,5 +1,6 @@
-// include/Messaging.h
-// Messaging constants matching Java NoteMessaging.java
+// include/note_messaging.h
+// Messaging constants as pre-serialized NoteBytes::Value objects
+// Matching Java NoteMessaging.java
 
 #ifndef MESSAGING_H
 #define MESSAGING_H
@@ -7,194 +8,206 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include "notebytes.h"
 
-namespace NoteMessaging{
-
+namespace NoteMessaging {
 
     // =============================================================================
-    // PROTOCOL MESSAGES - Standardized command strings
+    // PROTOCOL MESSAGES - Pre-serialized command strings
     // =============================================================================
     namespace ProtocolMessages {
         // Connection Lifecycle
-        constexpr const char* HELLO         = "hello";        // Initial handshake
-        constexpr const char* READY         = "ready";        // Server ready
-        constexpr const char* ACCEPT        = "accept";       // Operation accepted
-        constexpr const char* PING          = "ping";         // Heartbeat ping
-        constexpr const char* PONG          = "pong";         // Heartbeat pong
-        constexpr const char* SHUTDOWN      = "shutdown";     // Graceful shutdown
-        constexpr const char* DISCONNECTED  = "disconnected"; // Disconnect event
+        inline const NoteBytes::Value HELLO("hello");
+        inline const NoteBytes::Value READY("ready");
+        inline const NoteBytes::Value ACCEPT("accept");
+        inline const NoteBytes::Value PING("ping");
+        inline const NoteBytes::Value PONG("pong");
+        inline const NoteBytes::Value SHUTDOWN("shutdown");
+        inline const NoteBytes::Value DISCONNECTED("disconnected");
         
         // Discovery Phase
-        constexpr const char* REQUEST_DISCOVERY = "request_discovery"; // Request list
-        constexpr const char* ITEM_LIST         = "item_list";         // Item list response
-        constexpr const char* GET_ITEM_INFO     = "get_item_info";     // Request details
-        constexpr const char* ITEM_INFO         = "item_info";         // Item details response
-        constexpr const char* GET_CAPABILITIES  = "get_capabilities";  // Request caps
+        inline const NoteBytes::Value REQUEST_DISCOVERY("request_discovery");
+        inline const NoteBytes::Value ITEM_LIST("item_list");
+        inline const NoteBytes::Value GET_ITEM_INFO("get_item_info");
+        inline const NoteBytes::Value ITEM_INFO("item_info");
+        inline const NoteBytes::Value GET_CAPABILITIES("get_capabilities");
         
         // Claim Phase
-        constexpr const char* CLAIM_ITEM    = "claim_item";    // Claim resource
-        constexpr const char* ITEM_CLAIMED  = "item_claimed";  // Claim confirmed
-        constexpr const char* RELEASE_ITEM  = "release_item";  // Release resource
-        constexpr const char* ITEM_RELEASED = "item_released"; // Release confirmed
+        inline const NoteBytes::Value CLAIM_ITEM("claim_item");
+        inline const NoteBytes::Value ITEM_CLAIMED("item_claimed");
+        inline const NoteBytes::Value RELEASE_ITEM("release_item");
+        inline const NoteBytes::Value ITEM_RELEASED("item_released");
         
         // Configuration Phase
-        constexpr const char* SET_MODE      = "set_mode";      // Change mode
-        constexpr const char* SET_FILTER    = "set_filter";    // Apply filter
-        constexpr const char* ENABLE_FEATURE  = "enable_feature";  // Enable feature
-        constexpr const char* DISABLE_FEATURE = "disable_feature"; // Disable feature
+        inline const NoteBytes::Value SET_MODE("set_mode");
+        inline const NoteBytes::Value SET_FILTER("set_filter");
+        inline const NoteBytes::Value ENABLE_FEATURE("enable_feature");
+        inline const NoteBytes::Value DISABLE_FEATURE("disable_feature");
         
         // Streaming Control
-        constexpr const char* START_STREAM  = "start_stream";  // Begin streaming
-        constexpr const char* STOP_STREAM   = "stop_stream";   // Stop streaming
-        constexpr const char* PAUSE_ITEM    = "pause_item";    // Pause streaming
-        constexpr const char* RESUME_ITEM   = "resume_item";   // Resume streaming
-        constexpr const char* RESUME        = "resume";        // Client ready (ack)
+        inline const NoteBytes::Value START_STREAM("start_stream");
+        inline const NoteBytes::Value STOP_STREAM("stop_stream");
+        inline const NoteBytes::Value PAUSE_ITEM("pause_item");
+        inline const NoteBytes::Value RESUME_ITEM("resume_item");
+        
+        inline const NoteBytes::Value DEVICE_DISCONNECTED("device_disconnected");
+        inline const NoteBytes::Value RESUME("resume");
         
         // Encryption Lifecycle
-        constexpr const char* ENABLE_ENCRYPTION  = "enable_encryption";  // Start encryption
-        constexpr const char* DISABLE_ENCRYPTION = "disable_encryption"; // Stop encryption
-        constexpr const char* ENCRYPTION_READY   = "encryption_ready";   // Encryption active
+        inline const NoteBytes::Value ENABLE_ENCRYPTION("enable_encryption");
+        inline const NoteBytes::Value DISABLE_ENCRYPTION("disable_encryption");
+        inline const NoteBytes::Value ENCRYPTION_READY("encryption_ready");
         
         // Status Messages
-        constexpr const char* ERROR         = "error";         // Error occurred
-        constexpr const char* SUCCESS       = "success";       // Operation succeeded
-        constexpr const char* FAILED        = "failed";        // Operation failed
-        constexpr const char* PROGRESS      = "progress";      // Progress update
-        constexpr const char* INFO          = "info";          // Information
+        inline const NoteBytes::Value ERROR("error");
+        inline const NoteBytes::Value SUCCESS("success");
+        inline const NoteBytes::Value FAILED("failed");
+        inline const NoteBytes::Value PROGRESS("progress");
+        inline const NoteBytes::Value INFO("info");
         
         // State Changes
-        constexpr const char* STARTED       = "started";       // Started
-        constexpr const char* STOPPED       = "stopped";       // Stopped
-        constexpr const char* UPDATED       = "updated";       // Updated
-        constexpr const char* AVAILABLE_MSG = "available";     // Now available
-        constexpr const char* UNAVAILABLE   = "unavailable";   // Now unavailable
-        constexpr const char* TIMED_OUT     = "timed_out";     // Timeout occurred
+        inline const NoteBytes::Value STARTED("started");
+        inline const NoteBytes::Value STOPPED("stopped");
+        inline const NoteBytes::Value UPDATED("updated");
+        inline const NoteBytes::Value AVAILABLE_MSG("available");
+        inline const NoteBytes::Value UNAVAILABLE("unavailable");
+        inline const NoteBytes::Value TIMED_OUT("timed_out");
     }
 
-    
     // =============================================================================
-    // MESSAGE KEYS - Standardized field names
+    // MESSAGE KEYS - Pre-serialized field names
     // =============================================================================
-
     namespace Keys {
         // Identity & Routing
-        constexpr const char* UUID_128      = "uuid_128";
-        // Identity & Routing
-        constexpr const char* DEVICE_ID     = "device_id";
-        constexpr const char* ID            = "id";
-        constexpr const char* EVENT          = "event";
-        constexpr const char* SEQUENCE      = "seq_id";
-        constexpr const char* SESSION_ID    = "session_id";
-        constexpr const char* PID           = "pid";
-        constexpr const char* RECEIVER_ID   = "receiver_id";
-        constexpr const char* SENDER_ID     = "sender_id";
-        constexpr const char* CODE_KEY      = "code";
-        constexpr const char* CURRENT_MODE  = "current_mode";
-        constexpr const char* STATE_TYPE    = "state_type";
-        constexpr const char* IV            = "iv";
+        inline const NoteBytes::Value EMPTY("");
+        inline const NoteBytes::Value UUID_128("uuid_128");
+        inline const NoteBytes::Value DEVICE_ID("device_id");
+        inline const NoteBytes::Value ID("id");
+        inline const NoteBytes::Value EVENT("event");
+        inline const NoteBytes::Value SEQUENCE("seq_id");
+        inline const NoteBytes::Value SESSION_ID("session_id");
+        inline const NoteBytes::Value PID("pid");
+        inline const NoteBytes::Value RECEIVER_ID("receiver_id");
+        inline const NoteBytes::Value SENDER_ID("sender_id");
+        inline const NoteBytes::Value CODE_KEY("code");
+        inline const NoteBytes::Value CURRENT_MODE("current_mode");
+        inline const NoteBytes::Value STATE_TYPE("state_type");
+        inline const NoteBytes::Value IV("iv");
+        
         // Metadata
-        constexpr const char* NAME          = "name";
-        constexpr const char* TIMESTAMP     = "time_stamp";
-        constexpr const char* VERSION       = "version";
+        inline const NoteBytes::Value NAME("name");
+        inline const NoteBytes::Value TIMESTAMP("time_stamp");
+        inline const NoteBytes::Value VERSION("version");
         
         // Payload
-        constexpr const char* PAYLOAD       = "payload";
-        constexpr const char* STATE_FLAGS   = "state_flags";
-        constexpr const char* CMD           = "cmd";
+        inline const NoteBytes::Value PAYLOAD("payload");
+        inline const NoteBytes::Value STATE_FLAGS("state_flags");
+        inline const NoteBytes::Value CMD("cmd");
         
         // Status & Results
-        constexpr const char* STATUS        = "status";
-        constexpr const char* ERROR_CODE    = "error";
-        constexpr const char* MSG           = "msg";
-        constexpr const char* RESULT        = "result";
-        constexpr const char* WARNING       = "warning";
-        constexpr const char* EXCEPTION     = "exception";
-        constexpr const char* AVAILABLE     = "available";
-
-        // Items (Generic resource term)
-        constexpr const char* ITEM          = "item";
-        constexpr const char* ITEMS         = "items";
-        constexpr const char* ITEM_TYPE     = "item_type";
-        constexpr const char* ITEM_COUNT    = "item_count";
-        constexpr const char* ITEM_PATH     = "item_path";
-        constexpr const char* ITEM_CLASS        = "item_class";
-        constexpr const char* ITEM_SUBCLASS     = "item_subclass";
-        constexpr const char* ITEM_PROTOCOL     = "item_protocol";
-        constexpr const char* ITEM_ADDRESS      = "item_address";
-       
-        constexpr const char* VENDOR_ID         = "vendor_id";
-        constexpr const char* PRODUCT_ID        = "product_id";
-        constexpr const char* BUS_NUMBER        = "bus_number";
-        constexpr const char* MANUFACTURER      = "manufacturer";
-        constexpr const char* PRODUCT           = "product";
-        constexpr const char* SERIAL_NUMBER     = "serial_number";
-        constexpr const char* KERNEL_DRIVER_ATTACHED    = "kernel_driver_attached";
-        // Capabilities
-        constexpr const char* MODE                      = "mode";
-        constexpr const char* AVAILABLE_CAPABILITIES    = "available_capabilities";        
-        constexpr const char* CLAIMED_ITEMS             = "claimedItems";
-        constexpr const char* ENABLED_CAPABILITIES      = "enabled_capabilities";
-        constexpr const char* CAPABILITY_NAMES          = "capability_names";
-        constexpr const char* AVAILABLE_MODES           = "available_modes";
-
+        inline const NoteBytes::Value STATUS("status");
+        inline const NoteBytes::Value ERROR_CODE("error");
+        inline const NoteBytes::Value MSG("msg");
+        inline const NoteBytes::Value RESULT("result");
+        inline const NoteBytes::Value WARNING("warning");
+        inline const NoteBytes::Value EXCEPTION("exception");
+        inline const NoteBytes::Value AVAILABLE("available");
         
-        constexpr const char* DEFAULT_MODE      = "default_mode";
-        constexpr const char* CONSTRAINTS       = "constraints";
-        constexpr const char* CHILDREN          = "children";
+        // Items (Generic resource term)
+        inline const NoteBytes::Value ITEM("item");
+        inline const NoteBytes::Value ITEMS("items");
+        inline const NoteBytes::Value ITEM_TYPE("item_type");
+        inline const NoteBytes::Value ITEM_COUNT("item_count");
+        inline const NoteBytes::Value ITEM_PATH("item_path");
+        inline const NoteBytes::Value ITEM_CLASS("item_class");
+        inline const NoteBytes::Value ITEM_SUBCLASS("item_subclass");
+        inline const NoteBytes::Value ITEM_PROTOCOL("item_protocol");
+        inline const NoteBytes::Value ITEM_ADDRESS("item_address");
+        
+        inline const NoteBytes::Value VENDOR_ID("vendor_id");
+        inline const NoteBytes::Value PRODUCT_ID("product_id");
+        inline const NoteBytes::Value BUS_NUMBER("bus_number");
+        inline const NoteBytes::Value MANUFACTURER("manufacturer");
+        inline const NoteBytes::Value PRODUCT("product");
+        inline const NoteBytes::Value SERIAL_NUMBER("serial_number");
+        inline const NoteBytes::Value KERNEL_DRIVER_ATTACHED("kernel_driver_attached");
+        inline const NoteBytes::Value INTERFACE_NUMBER( "interface_number");
+        
+        // Capabilities
+        inline const NoteBytes::Value MODE("mode");
+        inline const NoteBytes::Value AVAILABLE_CAPABILITIES("available_capabilities");
+        inline const NoteBytes::Value CLAIMED_ITEMS("claimedItems");
+        inline const NoteBytes::Value ENABLED_CAPABILITIES("enabled_capabilities");
+        inline const NoteBytes::Value CAPABILITY_NAMES("capability_names");
+        inline const NoteBytes::Value AVAILABLE_MODES("available_modes");
+        inline const NoteBytes::Value DEFAULT_MODE("default_mode");
+        inline const NoteBytes::Value CONSTRAINTS("constraints");
+        inline const NoteBytes::Value CHILDREN("children");
         
         // Encryption
-        constexpr const char* ENCRYPTION    = "encryption";
-        constexpr const char* CIPHER        = "cipher";
-        constexpr const char* PHASE         = "phase";
-        constexpr const char* PUBLIC_KEY    = "pub_key";
-        constexpr const char* AES_IV        = "aes_iv";
+        inline const NoteBytes::Value ENCRYPTION("encryption");
+        inline const NoteBytes::Value CIPHER("cipher");
+        inline const NoteBytes::Value PHASE("phase");
+        inline const NoteBytes::Value PUBLIC_KEY("pub_key");
+        inline const NoteBytes::Value AES_IV("aes_iv");
         
         // Flow Control
-        constexpr const char* PROCESSED_COUNT = "processed_count";
-        constexpr const char* TOTAL           = "total";
-        constexpr const char* COMPLETED       = "completed";
+        inline const NoteBytes::Value PROCESSED_COUNT("processed_count");
+        inline const NoteBytes::Value TOTAL("total");
+        inline const NoteBytes::Value COMPLETED("completed");
+        
+        inline const NoteBytes::Value SCOPE("scope");
+        inline const NoteBytes::Value STATE("state");
 
-        constexpr const char* SCOPE         = "scope";
-        constexpr const char* STATE         = "state";
+          
+        inline const NoteBytes::Value MESSAGES_SENT("messages_sent");
+        inline const NoteBytes::Value MESSAGES_ACKED("messages_acked");
+        inline const NoteBytes::Value MISSED_PONGS("missed_pongs");
+        inline const NoteBytes::Value LAST_PING_SENT("last_ping_sent");
+        inline const NoteBytes::Value LAST_PONG_RECEIVED("last_pong_received");
+        inline const NoteBytes::Value PENDING_EVENTS("pending_events");
+        inline const NoteBytes::Value EVENTS_SENT("events_sent");
+        inline const NoteBytes::Value EVENTS_DROPPED("events_dropped");
+        
     }
 
     // =============================================================================
-    // ITEM TYPES - Generic resource types (context-specific)
+    // ITEM TYPES - Pre-serialized resource types
     // =============================================================================
     namespace ItemTypes {
         // USB Device Types
-        constexpr const char* KEYBOARD  = "keyboard";
-        constexpr const char* MOUSE     = "mouse";
-        constexpr const char* GAMEPAD   = "gamepad";
-        constexpr const char* TOUCHPAD  = "touchpad";
-        constexpr const char* UNKNOWN   = "unknown";
-        constexpr const char* PEN       = "pen";
-        constexpr const char* SCROLL    = "scroll";
+        inline const NoteBytes::Value KEYBOARD("keyboard");
+        inline const NoteBytes::Value MOUSE("mouse");
+        inline const NoteBytes::Value GAMEPAD("gamepad");
+        inline const NoteBytes::Value TOUCHPAD("touchpad");
+        inline const NoteBytes::Value UNKNOWN("unknown");
+        inline const NoteBytes::Value PEN("pen");
+        inline const NoteBytes::Value SCROLL("scroll");
         
         // Window Types (for future use)
-        constexpr const char* WINDOW    = "window";
-        constexpr const char* SCENE     = "scene";
-        constexpr const char* STAGE     = "stage";
+        inline const NoteBytes::Value WINDOW("window");
+        inline const NoteBytes::Value SCENE("scene");
+        inline const NoteBytes::Value STAGE("stage");
         
         // Network Types (for future use)
-        constexpr const char* PEER      = "peer";
-        constexpr const char* ENDPOINT  = "endpoint";
+        inline const NoteBytes::Value PEER("peer");
+        inline const NoteBytes::Value ENDPOINT("endpoint");
     }
 
     // =============================================================================
-    // MODES - Operating modes for items
+    // MODES - Pre-serialized operating modes
     // =============================================================================
     namespace Modes {
-        constexpr const char* RAW           = "raw";           // Raw data
-        constexpr const char* PARSED        = "parsed";        // Parsed events
-        constexpr const char* PASSTHROUGH   = "passthrough";   // OS passthrough
-        constexpr const char* FILTERED      = "filtered";      // With filters
-        constexpr const char* UNKNOWN       = ItemTypes::UNKNOWN;
-        constexpr const char* NONE          = "none";
+        inline const NoteBytes::Value RAW("raw");
+        inline const NoteBytes::Value PARSED("parsed");
+        inline const NoteBytes::Value PASSTHROUGH("passthrough");
+        inline const NoteBytes::Value FILTERED("filtered");
+        inline const NoteBytes::Value UNKNOWN("unknown");
+        inline const NoteBytes::Value NONE("none");
     }
 
     // =============================================================================
-    // ERROR CODES - Standardized error codes
+    // ERROR CODES - Standardized error codes (keep as integers)
     // =============================================================================
     namespace ErrorCodes {
         // General errors (0-9)
@@ -236,105 +249,34 @@ namespace NoteMessaging{
     }
 
     // =============================================================================
-    // STATUS VALUES - Common status strings
+    // STATUS VALUES - Pre-serialized status strings
     // =============================================================================
     namespace Status {
-        constexpr const char* OK            = "ok";
-        constexpr const char* READY         = "ready";
-        constexpr const char* PENDING       = "pending";
-        constexpr const char* PROCESSING    = "processing";
-        constexpr const char* COMPLETE      = "complete";
-        constexpr const char* FAILED        = "failed";
-        constexpr const char* CANCELLED     = "cancelled";
-        constexpr const char* ACTIVE        = "active";
+        inline const NoteBytes::Value OK("ok");
+        inline const NoteBytes::Value READY("ready");
+        inline const NoteBytes::Value PENDING("pending");
+        inline const NoteBytes::Value PROCESSING("processing");
+        inline const NoteBytes::Value COMPLETE("complete");
+        inline const NoteBytes::Value FAILED("failed");
+        inline const NoteBytes::Value CANCELLED("cancelled");
+        inline const NoteBytes::Value ACTIVE("active");
     }
-
-    // =============================================================================
-    // MESSAGE PATTERNS - Common message construction helpers
-    // =============================================================================
-
-    /**
-    * Standard message structure:
-    * {
-    *   "type": <byte>,           // Message type
-    *   "seqId": <6-byte array>,  // Sequence number
-    *   "cmd": <string>,          // Command (for TYPE_CMD)
-    *   ... additional fields
-    * }
-    */
-
-    /**
-    * Standard error structure:
-    * {
-    *   "type": TYPE_ERROR,
-    *   "seqId": <sequence>,
-    *   "error": <error_code>,
-    *   "msg": <error_message>
-    * }
-    */
-
-    /**
-    * Standard response structure:
-    * {
-    *   "type": TYPE_ACCEPT,
-    *   "seqId": <sequence>,
-    *   "status": <status_string>
-    * }
-    */
-
-    /**
-    * Standard item structure:
-    * {
-    *   "itemId": <identifier>,
-    *   "itemType": <type_string>,
-    *   "name": <human_name>,
-    *   "available": <bool>,
-    *   "availableCaps": <capability_set>,
-    *   "defaultMode": <mode_string>
-    * }
-    */
-
-    /**
-    * Standard claim request:
-    * {
-    *   "type": TYPE_CMD,
-    *   "seqId": <sequence>,
-    *   "cmd": "claim_item",
-    *   "itemId": <identifier>,
-    *   "srcId": <source_id>,
-    *   "pid": <process_id>,
-    *   "mode": <requested_mode>
-    * }
-    */
-
-    /**
-    * Standard routed event packet:
-    * [INTEGER:srcId][OBJECT or ENCRYPTED:event_packet]
-    * 
-    * Event packet structure:
-    * {
-    *   "type": <event_type>,
-    *   "seqId": <sequence>,
-    *   "stFlags": <state_flags>,    // optional
-    *   "payload": [<values>]         // optional
-    * }
-    */
-
 
     // =============================================================================
     // HELPER FUNCTIONS
     // =============================================================================
 
     /**
-    * Check if a string matches a protocol message constant
-    */
-    inline bool is_message(const std::string& str, const char* msg) {
-        return str == msg;
+     * Check if a NoteBytes::Value matches a protocol constant
+     * Uses optimized equality (hash-based)
+     */
+    inline bool is_message(const NoteBytes::Value& value, const NoteBytes::Value& constant) {
+        return value == constant;
     }
 
     /**
-    * Get error message for error code
-    */
+     * Get error message for error code
+     */
     inline const char* get_error_message(int error_code) {
         static const std::map<int, const char*> error_messages = {
             {ErrorCodes::UNKNOWN, "Unknown error"},
@@ -348,10 +290,14 @@ namespace NoteMessaging{
             {ErrorCodes::UNAUTHORIZED, "Unauthorized"},
             {ErrorCodes::PID_MISMATCH, "PID mismatch"},
             {ErrorCodes::CLAIM_FAILED, "Failed to claim item"},
+            {ErrorCodes::ENCRYPTION_FAILED, "Encryption failed"},
+            {ErrorCodes::DECRYPTION_FAILED, "Decryption failed"},
+            {ErrorCodes::KEY_EXCHANGE_FAILED, "Key exchange failed"},
         };
         
         auto it = error_messages.find(error_code);
         return (it != error_messages.end()) ? it->second : "Unknown error";
     }
 }
-#endif // MESSAGING
+
+#endif // MESSAGING_H

@@ -1,12 +1,11 @@
 // include/capability_registry.h
 // C++ Capability Registry matching Java CapabilityRegistry
+// Updated to work with pre-serialized NoteBytes::Value constants
 
 #ifndef CAPABILITY_REGISTRY_H
 #define CAPABILITY_REGISTRY_H
 
 #include <boost/multiprecision/cpp_int.hpp>
-
-
 #include <cstdint>
 #include <string>
 #include <map>
@@ -21,7 +20,6 @@ namespace Capabilities {
 
 /**
  * Capability bit positions (matching Java CapabilityRegistry)
- * Uses uint64_t for 64-bit capability masks
  */
 namespace Bits {
     // Input device types (bits 0-7)
@@ -32,7 +30,6 @@ namespace Bits {
     constexpr int PEN                  = 4;
     constexpr int TOUCHPAD             = 5;
     constexpr int SCROLL               = 6;
-
 
     constexpr int RAW_MODE             = 8;
     constexpr int PARSED_MODE          = 9;
@@ -50,37 +47,27 @@ namespace Bits {
     constexpr int PROVIDES_SCANCODES   = 27;
     constexpr int NANOSECOND_TIMESTAMPS = 28;
      
-     // Device type detection (bits 32-39)
-
     constexpr int DEVICE_TYPE_KNOWN    = 32;
     constexpr int HID_DEVICE           = 33;
     constexpr int USB_DEVICE           = 34;
     constexpr int BLUETOOTH_DEVICE     = 35;
      
-     // State capabilities (bits 40-47)
-
     constexpr int ENCRYPTION_SUPPORTED = 40;
     constexpr int ENCRYPTION_ENABLED   = 41;
     constexpr int BUFFERING_SUPPORTED  = 42;
     constexpr int BUFFERING_ENABLED    = 43;
      
-     // Lifecycle (bits 48-55)
     constexpr int SCENE_LOCATION       = 48;
     constexpr int SCENE_SIZE           = 49;
     constexpr int WINDOW_LIFECYCLE     = 50;
     constexpr int STAGE_POSITION       = 51;
     constexpr int STAGE_SIZE           = 52;
     constexpr int STAGE_FOCUS          = 53;
-     
-     // Composite capabilities (bits 56-63)
-
     
-    // Mode mask (all mutually exclusive modes)
     constexpr int COMPOSITE_SOURCE     = 56;
     constexpr int MULTIPLE_CHILDREN    = 57;
     
     const std::vector<int> MODE_BITS = {RAW_MODE, PARSED_MODE, PASSTHROUGH_MODE, FILTERED_MODE};
-    
 }
 
 namespace Masks {
@@ -116,20 +103,23 @@ namespace Masks {
  * Capability names for string conversion
  */
 namespace Names {
+    /**
+     * Get capability name as C string (for logging)
+     */
     inline const char* get_capability_name(int bit_position) {
         switch (bit_position) {
-            case Bits::KEYBOARD: return NoteMessaging::ItemTypes::KEYBOARD;
-            case Bits::MOUSE: return NoteMessaging::ItemTypes::MOUSE;
-            case Bits::TOUCH: return NoteMessaging::ItemTypes::TOUCHPAD;
-            case Bits::GAMEPAD: return NoteMessaging::ItemTypes::GAMEPAD;
-            case Bits::PEN: return NoteMessaging::ItemTypes::PEN;
-            case Bits::TOUCHPAD: return NoteMessaging::ItemTypes::TOUCHPAD;
-            case Bits::SCROLL: return NoteMessaging::ItemTypes::SCROLL;
+            case Bits::KEYBOARD: return "keyboard";
+            case Bits::MOUSE: return "mouse";
+            case Bits::TOUCH: return "touchpad";
+            case Bits::GAMEPAD: return "gamepad";
+            case Bits::PEN: return "pen";
+            case Bits::TOUCHPAD: return "touchpad";
+            case Bits::SCROLL: return "scroll";
             
-            case Bits::RAW_MODE: return NoteMessaging::Modes::RAW;
-            case Bits::PARSED_MODE: return NoteMessaging::Modes::PARSED;
-            case Bits::PASSTHROUGH_MODE: return NoteMessaging::Modes::PASSTHROUGH;
-            case Bits::FILTERED_MODE: return NoteMessaging::Modes::FILTERED;
+            case Bits::RAW_MODE: return "raw";
+            case Bits::PARSED_MODE: return "parsed";
+            case Bits::PASSTHROUGH_MODE: return "passthrough";
+            case Bits::FILTERED_MODE: return "filtered";
             
             case Bits::ABSOLUTE_COORDINATES: return "absolute_coordinates";
             case Bits::RELATIVE_COORDINATES: return "relative_coordinates";
@@ -156,20 +146,22 @@ namespace Names {
         }
     }
     
+    /**
+     * Get capability bit position from string name
+     */
     inline int get_capability_bit(const std::string& name) {
         static std::map<std::string, int> name_to_bit = {
-            {NoteMessaging::ItemTypes::KEYBOARD, Bits::KEYBOARD},
-            {NoteMessaging::ItemTypes::MOUSE, Bits::MOUSE},
-            {NoteMessaging::ItemTypes::TOUCHPAD, Bits::TOUCH},
-            {NoteMessaging::ItemTypes::GAMEPAD, Bits::GAMEPAD},
-            {NoteMessaging::ItemTypes::PEN, Bits::PEN},
-            {NoteMessaging::ItemTypes::TOUCHPAD, Bits::TOUCHPAD},
-            {NoteMessaging::ItemTypes::SCROLL, Bits::SCROLL},
+            {"keyboard", Bits::KEYBOARD},
+            {"mouse", Bits::MOUSE},
+            {"touchpad", Bits::TOUCH},
+            {"gamepad", Bits::GAMEPAD},
+            {"pen", Bits::PEN},
+            {"scroll", Bits::SCROLL},
             
-            {NoteMessaging::Modes::RAW, Bits::RAW_MODE},
-            {NoteMessaging::Modes::PARSED, Bits::PARSED_MODE},
-            {NoteMessaging::Modes::PASSTHROUGH, Bits::PASSTHROUGH_MODE},
-            {NoteMessaging::Modes::FILTERED, Bits::FILTERED_MODE},
+            {"raw", Bits::RAW_MODE},
+            {"parsed", Bits::PARSED_MODE},
+            {"passthrough", Bits::PASSTHROUGH_MODE},
+            {"filtered", Bits::FILTERED_MODE},
             
             {"absolute_coordinates", Bits::ABSOLUTE_COORDINATES},
             {"relative_coordinates", Bits::RELATIVE_COORDINATES},
@@ -194,7 +186,30 @@ namespace Names {
         };
         
         auto it = name_to_bit.find(name);
-        return (it != name_to_bit.end()) ? it->second : 0;
+        return (it != name_to_bit.end()) ? it->second : -1;
+    }
+    
+    /**
+     * Get pre-serialized NoteBytes::Value for a capability
+     * Useful for protocol messages
+     */
+    inline const NoteBytes::Value& get_capability_value(int bit_position) {
+        switch (bit_position) {
+            case Bits::KEYBOARD: return NoteMessaging::ItemTypes::KEYBOARD;
+            case Bits::MOUSE: return NoteMessaging::ItemTypes::MOUSE;
+            case Bits::TOUCH: return NoteMessaging::ItemTypes::TOUCHPAD;
+            case Bits::GAMEPAD: return NoteMessaging::ItemTypes::GAMEPAD;
+            case Bits::PEN: return NoteMessaging::ItemTypes::PEN;
+            case Bits::TOUCHPAD: return NoteMessaging::ItemTypes::TOUCHPAD;
+            case Bits::SCROLL: return NoteMessaging::ItemTypes::SCROLL;
+            
+            case Bits::RAW_MODE: return NoteMessaging::Modes::RAW;
+            case Bits::PARSED_MODE: return NoteMessaging::Modes::PARSED;
+            case Bits::PASSTHROUGH_MODE: return NoteMessaging::Modes::PASSTHROUGH;
+            case Bits::FILTERED_MODE: return NoteMessaging::Modes::FILTERED;
+            
+            default: return NoteMessaging::ItemTypes::UNKNOWN;
+        }
     }
 
     inline std::string format_capabilities(const cpp_int& caps) {
@@ -232,7 +247,7 @@ namespace Validation {
     
     inline int get_enabled_mode(const cpp_int& state) {
         cpp_int mode_mask = Masks::mode_mask();
-        cpp_int masked_state = state & mode_mask;  // explicitly name it
+        cpp_int masked_state = state & mode_mask;
         for (int mode_bit : Bits::MODE_BITS) {
             if (State::bit_test(masked_state, mode_bit)) return mode_bit;
         }
@@ -241,7 +256,7 @@ namespace Validation {
 
     inline const char* get_mode_name(const cpp_int& state) {
         int mode = get_enabled_mode(state);
-        if (mode < 0) return NoteMessaging::Modes::NONE;
+        if (mode < 0) return "none";
         return Names::get_capability_name(mode);
     }
     
@@ -263,20 +278,20 @@ namespace Validation {
         return State::apply_mask(capabilities, device_mask);
     }
 
-    inline bool validate_mode_compatibility(const std::string& device_type, const std::string& requested_mode) {
+    inline bool validate_mode_compatibility(const std::string& device_type, 
+                                           const std::string& requested_mode) {
         // Raw mode works with everything
-        if (requested_mode == NoteMessaging::Modes::RAW) {
+        if (requested_mode == "raw") {
             return true;
         }
         
         // Parsed mode requires known device type
-        if (requested_mode == NoteMessaging::Modes::PARSED) {
-            return device_type != NoteMessaging::Modes::UNKNOWN;
+        if (requested_mode == "parsed") {
+            return device_type != "unknown";
         }
         
         return true;
     }
-        
 }
 
 /**
@@ -314,7 +329,6 @@ namespace Detection {
         return caps;
     }
     
-    
     inline cpp_int detect_unknown_capabilities() {
         cpp_int caps = 0;
         State::bit_set(caps, Bits::HID_DEVICE);
@@ -327,7 +341,7 @@ namespace Detection {
     }
     
     inline int get_default_mode(const std::string& device_type) {
-        if (device_type == NoteMessaging::ItemTypes::UNKNOWN) {
+        if (device_type == "unknown") {
             return Bits::RAW_MODE;
         } else {
             return Bits::PARSED_MODE;

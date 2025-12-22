@@ -1,10 +1,10 @@
 // src/notebytes.h
 // C++ implementation of NoteBytes serialization format
 // Compatible with Java NoteBytes for cross-language communication
+// Added hash and equality for use as map keys
 
 #ifndef NOTEBYTES_H
 #define NOTEBYTES_H
-
 
 #include <cstdint>
 #include <cstring>
@@ -13,12 +13,12 @@
 #include <string_view>
 #include <vector>
 #include <memory>
+#include <functional>
 #include <boost/multiprecision/cpp_int.hpp>
 
 using boost::multiprecision::cpp_int;
 
 namespace NoteBytes {
-
 
     // Type constants matching Java NoteBytesMetaData
     namespace Type {
@@ -52,7 +52,6 @@ namespace NoteBytes {
     }
 
     constexpr size_t METADATA_SIZE = 5;  // 1 byte type + 4 bytes length
-
 
     /**
     * Base NoteBytes class - represents a typed byte array
@@ -99,27 +98,21 @@ namespace NoteBytes {
         }
 
         Value(cpp_int val) : type_(Type::BIG_INTEGER) {
-
             auto& bytes = data_;
-
             bool negative = val < 0;
             cpp_int magnitude = negative ? -val : val;
 
-            // Export magnitude (big-endian)
             export_bits(magnitude, std::back_inserter(bytes), 8, true);
 
             if (bytes.empty()) {
                 bytes.push_back(0);
             }
 
-            // ---------- Java two's complement rules ----------
             if (negative) {
-                // STEP 1: invert bytes
                 for (auto& b : bytes) {
                     b = ~b;
                 }
 
-                // STEP 2: add 1
                 bool carry = true;
                 for (int i = bytes.size() - 1; i >= 0 && carry; --i) {
                     uint16_t sum = uint16_t(bytes[i]) + 1;
@@ -127,13 +120,10 @@ namespace NoteBytes {
                     carry = (sum >> 8) != 0;
                 }
 
-                // STEP 3: ensure sign bit is correct (Java always ensures MSB=1 for negatives)
                 if ((bytes[0] & 0x80) == 0) {
                     bytes.insert(bytes.begin(), 0xFF);
                 }
-
             } else {
-                // Positive — if MSB is 1, Java inserts a leading zero to avoid sign confusion
                 if (bytes[0] & 0x80) {
                     bytes.insert(bytes.begin(), 0x00);
                 }
@@ -187,30 +177,23 @@ namespace NoteBytes {
         }
 
         cpp_int as_cpp_int() const {
-
             const auto& data = data_;
             if (data.empty()) return 0;
 
             bool negative = (data[0] & 0x80) != 0;
-
             cpp_int result = 0;
 
             if (!negative) {
-                // Positive → magnitude = bytes as-is
                 import_bits(result, data.begin(), data.end(), 8, true);
                 return result;
             }
 
-            // ----------- NEGATIVE: two's complement decode -----------
-
             std::vector<uint8_t> mag(data);
 
-            // invert
             for (auto& b : mag) {
                 b = ~b;
             }
 
-            // add 1
             bool carry = true;
             for (int i = mag.size() - 1; i >= 0 && carry; --i) {
                 uint16_t sum = uint16_t(mag[i]) + 1;
@@ -218,8 +201,6 @@ namespace NoteBytes {
                 carry = (sum >> 8) != 0;
             }
 
-            // After decoding, drop any *single* leading sign-extension byte if added earlier
-            // Java drops only one 0x00 from positive and only one 0xFF from negative representation.
             if (mag.size() > 1 && (mag[0] == 0x00 || mag[0] == 0xFF)) {
                 mag.erase(mag.begin());
             }
@@ -227,7 +208,6 @@ namespace NoteBytes {
             import_bits(result, mag.begin(), mag.end(), 8, true);
             return -result;
         }
-
         
         bool as_bool() const {
             return !data_.empty() && data_[0] != 0;
@@ -246,6 +226,52 @@ namespace NoteBytes {
         
         uint8_t as_byte() const {
             return data_.empty() ? 0 : data_[0];
+        }
+        
+        // ===== HASH AND EQUALITY FOR MAP KEYS =====
+        
+        /**
+         * Calculate hash code (compatible with Java hashCode)
+         * Uses type and data bytes
+         */
+        size_t hash_code() const {
+            size_t hash = type_;
+            
+            // Simple hash combining type and data
+            // Matches Java's Arrays.hashCode() behavior
+            for (const auto& byte : data_) {
+                hash = hash * 31 + byte;
+            }
+            
+            return hash;
+        }
+        
+        /**
+         * Equality comparison (compatible with Java equals)
+         * Two Values are equal if they have same type and data
+         */
+        bool equals(const Value& other) const {
+            if (type_ != other.type_) {
+                return false;
+            }
+            return data_ == other.data_;
+        }
+        
+        // Operator overloads for C++ containers
+        bool operator==(const Value& other) const {
+            return equals(other);
+        }
+        
+        bool operator!=(const Value& other) const {
+            return !equals(other);
+        }
+        
+        // Less-than for std::map (ordered map)
+        bool operator<(const Value& other) const {
+            if (type_ != other.type_) {
+                return type_ < other.type_;
+            }
+            return data_ < other.data_;
         }
         
         // Serialization: write to buffer
@@ -330,81 +356,159 @@ namespace NoteBytes {
 
     public:
         Object() = default;
-        template <typename T>
-        void add(std::string_view key, T&& value) {
-            pairs_.emplace_back(key, Value(std::forward<T>(value)));
-        }
+        
+  
         void add(const Pair& pair) {
             pairs_.push_back(pair);
         }
 
-        void add(std::string_view key, const Value& value) {
+    
+        void add(const Value& key, const Value& value) {
             pairs_.emplace_back(key, value);
         }
-      /*
+
+        // 2️⃣ NoteBytes key, arbitrary value
+        template <typename T>
+        void add(const Value& key, T&& value) {
+            pairs_.emplace_back(key, Value(std::forward<T>(value)));
+        }
+
+   
+        template <typename T>
+        void add(std::string_view key, T&& value) {
+            pairs_.emplace_back(Value(key), Value(std::forward<T>(value)));
+        }
+
         
-         Get methods
-        const Value* get(const std::string& key) const {
+        const Value* get(const Value& key) const {
             for (const auto& pair : pairs_) {
-                if (pair.key().as_string() == key) {
+                if (pair.key().equals(key)) {
                     return &pair.value();
                 }
             }
             return nullptr;
-        }*/
+        }
 
         const Value* get(std::string_view key) const {
-            for (const auto& pair : pairs_) {
-                if (pair.key().as_string() == key) {
-                    return &pair.value();
-                }
+            Value key_val(key);
+            return get(key_val);
+        }
+
+        
+        std::string get_string(std::string_view key,
+                       std::string_view default_val = "") const {
+            if (const Value* val = get(key)) {
+                return val->as_string();
             }
-            return nullptr;
+            return std::string(default_val);
+        }
+
+        std::string get_string(const Value& key,
+                       std::string_view default_val = "") const {
+            if (const Value* val = get(key)) {
+                return val->as_string();
+            }
+            return std::string(default_val);
+        }
+
+        std::string get_string(const Value& key,
+                       const Value& default_valkey = "") const {
+            if (const Value* val = get(key)) {
+                return val->as_string();
+            }
+            return default_valkey.as_string();
         }
 
         
-                
-        std::string get_string(const std::string& key, const std::string& default_val = "") const {
-            const Value* val = get(key);
-            return val ? val->as_string() : default_val;
-        }
-        
-        int32_t get_int(const std::string& key, int32_t default_val = 0) const {
-            const Value* val = get(key);
-            return val ? val->as_int() : default_val;
-        }
-        
-        int64_t get_long(const std::string& key, int64_t default_val = 0) const {
-            const Value* val = get(key);
-            return val ? val->as_long() : default_val;
+        int32_t get_int(std::string_view key, int32_t default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_int();
+            }
+            return default_val;
         }
 
-        cpp_int get_cpp_int(const std::string& key, cpp_int default_val = 0) const {
-            const Value* val = get(key);
-            return val ? val->as_cpp_int() : default_val;
+        int32_t get_int(const Value& key, int32_t default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_int();
+            }
+            return default_val;
         }
+
         
-        bool get_bool(const std::string& key, bool default_val = false) const {
-            const Value* val = get(key);
-            return val ? val->as_bool() : default_val;
+        int64_t get_long(std::string_view key, int64_t default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_long();
+            }
+            return default_val;
         }
-        
-        uint8_t get_byte(const std::string& key, uint8_t default_val = 0) const {
-            const Value* val = get(key);
-            return val ? val->as_byte() : default_val;
+
+        int64_t get_long(const Value& key, int64_t default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_long();
+            }
+            return default_val;
         }
+
+
+        cpp_int get_cpp_int(std::string_view key, cpp_int default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_cpp_int();
+            }
+            return default_val;
+        }
+
+        cpp_int get_cpp_int(const Value& key, cpp_int default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_cpp_int();
+            }
+            return default_val;
+        }
+
         
-        bool contains(const std::string& key) const {
+        bool get_bool(std::string_view key, bool default_val = false) const {
+            if (const Value* val = get(key)) {
+                return val->as_bool();
+            }
+            return default_val;
+        }
+
+        bool get_bool(const Value& key, bool default_val = false) const {
+            if (const Value* val = get(key)) {
+                return val->as_bool();
+            }
+            return default_val;
+        }
+
+        
+        uint8_t get_byte(std::string_view key, uint8_t default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_byte();
+            }
+            return default_val;
+        }
+
+        uint8_t get_byte(const Value& key, uint8_t default_val = 0) const {
+            if (const Value* val = get(key)) {
+                return val->as_byte();
+            }
+            return default_val;
+        }
+
+        
+        bool contains(std::string_view key) const {
             return get(key) != nullptr;
         }
+
+        bool contains(const Value& key) const {
+            return get(key) != nullptr;
+        }
+
         
         size_t size() const { return pairs_.size(); }
         bool empty() const { return pairs_.empty(); }
         
-        // Iteration
         const std::vector<Pair>& pairs() const { return pairs_; }
         
-        // Serialization (body only, no header)
         size_t serialized_size() const {
             size_t total = 0;
             for (const auto& pair : pairs_) {
@@ -423,10 +527,6 @@ namespace NoteBytes {
             return buffer;
         }
         
-        /**
-        * Serialize with 5-byte header: [1-byte type][4-byte length]
-        * This matches Java's packet format exactly
-        */
         std::vector<uint8_t> serialize_with_header() const {
             auto body = serialize();
             uint32_t body_len = body.size();
@@ -442,7 +542,6 @@ namespace NoteBytes {
             return packet;
         }
         
-        // Deserialization
         static Object deserialize(const uint8_t* buffer, size_t length) {
             Object obj;
             size_t offset = 0;
@@ -453,9 +552,6 @@ namespace NoteBytes {
             return obj;
         }
         
-        /**
-        * Deserialize from packet with 5-byte header
-        */
         static Object deserialize_from_packet(const uint8_t* buffer) {
             uint8_t type = buffer[0];
             if (type != Type::OBJECT) {
@@ -497,7 +593,6 @@ namespace NoteBytes {
         
         const std::vector<Value>& values() const { return values_; }
         
-        // Serialization
         size_t serialized_size() const {
             size_t total = 0;
             for (const auto& val : values_) {
@@ -522,6 +617,16 @@ namespace NoteBytes {
         }
     };
 
+} // namespace NoteBytes
+
+// Hash function for std::unordered_map
+namespace std {
+    template<>
+    struct hash<NoteBytes::Value> {
+        size_t operator()(const NoteBytes::Value& val) const {
+            return val.hash_code();
+        }
+    };
 }
 
 #endif // NOTEBYTES_H

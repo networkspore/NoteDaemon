@@ -1,3 +1,5 @@
+// include/state.h
+// State management with pre-serialized NoteBytes::Value constants
 
 #ifndef FLAGS_H
 #define FLAGS_H
@@ -10,7 +12,6 @@
 #include "capability_registry.h"
 
 using boost::multiprecision::cpp_int;
-
 
 namespace State {
 
@@ -65,8 +66,6 @@ namespace State {
         }
     }
 
-
-    
     /**
     * Device state flags (matches Java DeviceStateFlags)
     * Uses bit POSITIONS
@@ -113,6 +112,7 @@ namespace State {
                 return create_range_mask(DeviceFlags::STREAMING, DeviceFlags::EVENT_BUFFERING);
             }
         }
+        
         inline std::string get_mode_name(const cpp_int& state) {
             if (bit_test(state, RAW_MODE)) return "raw";
             if (bit_test(state, PARSED_MODE)) return "parsed";
@@ -120,7 +120,6 @@ namespace State {
             return "unknown";
         }
 
-       
         inline bool has_any_errors(const cpp_int& state) {
            cpp_int error_mask = DeviceMasks::error_mask();
             return has_any_bits(state, error_mask);
@@ -132,9 +131,6 @@ namespace State {
                 !bit_test(state, BACKPRESSURE_ACTIVE);
         }
     }
-
-    
-
 
     /**
     * Client session state (C++ version)
@@ -282,9 +278,15 @@ namespace State {
                 NoteBytes::Object obj;
                 obj.add(NoteMessaging::Keys::VENDOR_ID, vendor_id);
                 obj.add(NoteMessaging::Keys::PRODUCT_ID, product_id);
-                if (!manufacturer.empty()) obj.add(NoteMessaging::Keys::MANUFACTURER, manufacturer);
-                if (!product.empty()) obj.add(NoteMessaging::Keys::PRODUCT, product);
-                if (!serial_number.empty()) obj.add(NoteMessaging::Keys::SERIAL_NUMBER, serial_number);
+                if (!manufacturer.empty()) {
+                    obj.add(NoteMessaging::Keys::MANUFACTURER, manufacturer);
+                }
+                if (!product.empty()) {
+                    obj.add(NoteMessaging::Keys::PRODUCT, product);
+                }
+                if (!serial_number.empty()) {
+                    obj.add(NoteMessaging::Keys::SERIAL_NUMBER, serial_number);
+                }
                 obj.add(NoteMessaging::Keys::BUS_NUMBER, bus_number);
                 obj.add(NoteMessaging::Keys::ITEM_ADDRESS, device_address);
                 return obj;
@@ -401,9 +403,9 @@ namespace State {
         }
     };
 
-
     /**
     * Serialize BitFlagStateMachine to NoteBytes::Object
+    * Uses pre-serialized keys
     */
     inline NoteBytes::Object serialize_state_machine(const BitFlagStateMachine& sm) {
         NoteBytes::Object obj;
@@ -415,9 +417,10 @@ namespace State {
 
     /**
     * Deserialize NoteBytes::Object to BitFlagStateMachine
+    * Uses pre-serialized keys
     */
     inline BitFlagStateMachine deserialize_state_machine(const NoteBytes::Object& obj) {
-        std::string id = obj.get_string(NoteMessaging::Keys::ID, NoteMessaging::ItemTypes::UNKNOWN);
+        std::string id = obj.get_string(NoteMessaging::Keys::ID, NoteMessaging::Modes::UNKNOWN);
         cpp_int state = obj.get_cpp_int(NoteMessaging::Keys::STATE);
         
         return BitFlagStateMachine(id, state);
@@ -425,6 +428,7 @@ namespace State {
 
     /**
     * Serialize ClientSession state for protocol transmission
+    * Uses pre-serialized keys
     */
     inline NoteBytes::Object serialize_client_session(const ClientSession& session) {
         NoteBytes::Object obj;
@@ -432,18 +436,21 @@ namespace State {
         obj.add(NoteMessaging::Keys::PID, (int32_t)session.client_pid);
         obj.add(NoteMessaging::Keys::STATE, session.state.get_state());
         
-        obj.add("messages_sent", (int32_t)session.messages_sent.load());
-        obj.add("messages_acked", (int32_t)session.messages_acknowledged.load());
-        obj.add("missed_pongs", (int32_t)session.missed_pongs.load());
+        obj.add(NoteMessaging::Keys::MESSAGES_SENT, (int32_t)session.messages_sent.load());
+        obj.add(NoteMessaging::Keys::MESSAGES_ACKED, (int32_t)session.messages_acknowledged.load());
+        obj.add(NoteMessaging::Keys::MISSED_PONGS, (int32_t)session.missed_pongs.load());
         
-        obj.add("last_ping_sent", (int64_t)session.last_ping_sent);
-        obj.add("last_pong_received", (int64_t)session.last_pong_received);
+        obj.add(NoteMessaging::Keys::LAST_PING_SENT, (int64_t)session.last_ping_sent);
+        obj.add(NoteMessaging::Keys::LAST_PONG_RECEIVED, (int64_t)session.last_pong_received);
         
         return obj;
     }
 
+  
+
     /**
     * Serialize DeviceState for protocol transmission
+    * Uses pre-serialized keys
     */
     inline NoteBytes::Object serialize_device_state(const DeviceState& device) {
         NoteBytes::Object obj;
@@ -457,23 +464,28 @@ namespace State {
         obj.add(NoteMessaging::Keys::ENABLED_CAPABILITIES, device.enabled_capabilities);
         obj.add(NoteMessaging::Keys::CURRENT_MODE, device.get_current_mode_bit());
         
-        obj.add("pending_events", (int32_t)device.pending_events.load());
-        obj.add("events_sent", (int64_t)device.events_sent.load());
-        obj.add("events_dropped", (int64_t)device.events_dropped.load());
+        obj.add(NoteMessaging::Keys::PENDING_EVENTS, (int32_t)device.pending_events.load());
+        obj.add(NoteMessaging::Keys::EVENTS_SENT, (int64_t)device.events_sent.load());
+        obj.add(NoteMessaging::Keys::EVENTS_DROPPED, (int64_t)device.events_dropped.load());
         
         return obj;
     }
 
     /**
     * Sync state from protocol message (update local state machine from Java)
+    * Uses pre-serialized keys
     */
     inline void sync_state_from_protocol(BitFlagStateMachine& sm, const NoteBytes::Object& msg) {
-        cpp_int new_state = msg.get_cpp_int(NoteMessaging::Keys::STATE);
-        sm.set_state(new_state);
+        auto* state_value = msg.get(NoteMessaging::Keys::STATE);
+        if (state_value) {
+            cpp_int new_state = state_value->as_cpp_int();
+            sm.set_state(new_state);
+        }
     }
 
     /**
-    * Example: Send state update message
+    * Create state update message
+    * Uses pre-serialized keys
     */
     inline NoteBytes::Object create_state_update_message(
         const BitFlagStateMachine& sm,
@@ -488,7 +500,6 @@ namespace State {
         return msg;
     }
 
+} // namespace State
 
-}
-
-#endif 
+#endif // FLAGS_H

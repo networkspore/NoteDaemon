@@ -7,9 +7,11 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o
  /home/iospore/Dev/Netnotes/NoteDaemon/include/bitflag_state_bigint.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/capability_registry.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/device_session.h
+ /home/iospore/Dev/Netnotes/NoteDaemon/include/device_streaming_thread.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/encryption.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/encryption_protocol.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/event_bytes.h
+ /home/iospore/Dev/Netnotes/NoteDaemon/include/hid_device_streaming_thread.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/hid_parser.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/input_packet.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/key_code.h
@@ -18,6 +20,7 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o
  /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_reader.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_writer.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/state.h
+ /home/iospore/Dev/Netnotes/NoteDaemon/include/usb_device_descriptor.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/utils.h
  /usr/include/alloca.h
  /usr/include/asm-generic/bitsperlong.h

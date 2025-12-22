@@ -308,7 +308,12 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: \
  /usr/include/c++/13/bits/stl_deque.h /usr/include/c++/13/bits/deque.tcc \
  /usr/include/c++/13/bits/stl_queue.h /usr/include/c++/13/mutex \
  /usr/include/c++/13/bits/unique_lock.h \
- /usr/include/c++/13/condition_variable \
+ /usr/include/c++/13/condition_variable /usr/include/c++/13/functional \
+ /usr/include/c++/13/bits/std_function.h \
+ /usr/include/c++/13/unordered_map \
+ /usr/include/c++/13/bits/unordered_map.h \
+ /usr/include/c++/13/bits/hashtable.h \
+ /usr/include/c++/13/bits/hashtable_policy.h \
  /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/bitflag_state_bigint.h \
  /usr/include/boost/multiprecision/cpp_int.hpp \
  /usr/include/c++/13/iostream \
@@ -711,11 +716,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: \
  /usr/include/boost/mpl/less.hpp \
  /usr/include/boost/mpl/aux_/preprocessed/gcc/less.hpp \
  /usr/include/boost/numeric/conversion/converter_policies.hpp \
- /usr/include/c++/13/functional /usr/include/c++/13/bits/std_function.h \
- /usr/include/c++/13/unordered_map \
- /usr/include/c++/13/bits/unordered_map.h \
- /usr/include/c++/13/bits/hashtable.h \
- /usr/include/c++/13/bits/hashtable_policy.h \
  /usr/include/boost/config/no_tr1/cmath.hpp /usr/include/c++/13/cmath \
  /usr/include/math.h /usr/include/x86_64-linux-gnu/bits/math-vector.h \
  /usr/include/x86_64-linux-gnu/bits/libm-simd-decl-stubs.h \
@@ -990,4 +990,7 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: \
  /usr/include/openssl/pkcs7.h /usr/include/openssl/pkcs7err.h \
  /usr/include/openssl/http.h /usr/include/openssl/conf.h \
  /usr/include/openssl/conferr.h /usr/include/openssl/conftypes.h \
- /usr/include/openssl/pemerr.h
+ /usr/include/openssl/pemerr.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/usb_device_descriptor.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/device_streaming_thread.h \
+ /home/iospore/Dev/Netnotes/NoteDaemon/src/../include/hid_device_streaming_thread.h

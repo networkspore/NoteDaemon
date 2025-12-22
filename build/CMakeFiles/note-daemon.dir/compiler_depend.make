@@ -6,9 +6,11 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
   /home/iospore/Dev/Netnotes/NoteDaemon/include/bitflag_state_bigint.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/capability_registry.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/device_session.h \
+  /home/iospore/Dev/Netnotes/NoteDaemon/include/device_streaming_thread.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/encryption.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/encryption_protocol.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/event_bytes.h \
+  /home/iospore/Dev/Netnotes/NoteDaemon/include/hid_device_streaming_thread.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/hid_parser.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/input_packet.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/key_code.h \
@@ -17,6 +19,7 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
   /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_reader.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/notebytes_writer.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/state.h \
+  /home/iospore/Dev/Netnotes/NoteDaemon/include/usb_device_descriptor.h \
   /home/iospore/Dev/Netnotes/NoteDaemon/include/utils.h \
   /usr/include/alloca.h \
   /usr/include/asm-generic/bitsperlong.h \
@@ -1147,7 +1150,9 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/tmmintrin.h:
 
-/usr/include/boost/type_traits/make_void.hpp:
+/usr/lib/gcc/x86_64-linux-gnu/13/include/tbmintrin.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h:
 
 /usr/include/boost/type_traits/is_unsigned.hpp:
 
@@ -1239,13 +1244,13 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/range/rbegin.hpp:
 
-/usr/include/boost/type_traits/make_unsigned.hpp:
-
 /usr/include/boost/range/has_range_iterator.hpp:
 
 /usr/include/boost/range/empty.hpp:
 
 /usr/include/boost/range/detail/msvc_has_iterator_workaround.hpp:
+
+/home/iospore/Dev/Netnotes/NoteDaemon/include/hid_device_streaming_thread.h:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/lwpintrin.h:
 
@@ -1296,6 +1301,10 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/c++/13/bits/stringfwd.h:
 
 /usr/include/c++/13/cerrno:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/syslimits.h:
+
+/usr/include/boost/mpl/quote.hpp:
 
 /usr/include/boost/preprocessor/identity.hpp:
 
@@ -1374,8 +1383,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/c++/13/bits/char_traits.h:
 
 /usr/include/boost/range/difference_type.hpp:
-
-/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:
 
 /usr/include/boost/preprocessor/arithmetic/detail/is_minimum_number.hpp:
 
@@ -1575,6 +1582,8 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/avx512dqintrin.h:
 
+/usr/include/boost/type_traits/make_unsigned.hpp:
+
 /usr/include/boost/multiprecision/detail/digits.hpp:
 
 /usr/include/boost/multiprecision/detail/constexpr.hpp:
@@ -1603,11 +1612,13 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/type_traits/is_pointer.hpp:
 
-/usr/include/boost/math/special_functions/sign.hpp:
+/usr/include/boost/multiprecision/detail/empty_value.hpp:
 
-/usr/include/boost/mpl/aux_/lambda_arity_param.hpp:
+/usr/include/boost/preprocessor/facilities/identity.hpp:
 
-/usr/include/x86_64-linux-gnu/bits/local_lim.h:
+/usr/include/x86_64-linux-gnu/bits/sigthread.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/avx512vbmivlintrin.h:
 
 /usr/include/c++/13/tr1/ell_integral.tcc:
 
@@ -1671,13 +1682,13 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/lexical_cast/bad_lexical_cast.hpp:
 
-/usr/include/boost/core/enable_if.hpp:
-
 /usr/include/boost/multiprecision/cpp_int/import_export.hpp:
 
 /usr/include/boost/multiprecision/traits/is_restricted_conversion.hpp:
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_sigstack.h:
+
+/usr/include/boost/core/enable_if.hpp:
 
 /usr/include/boost/preprocessor/arithmetic/add.hpp:
 
@@ -1696,6 +1707,8 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/type_traits/detail/is_member_function_pointer_cxx_11.hpp:
 
 /usr/include/c++/13/cstdint:
+
+/home/iospore/Dev/Netnotes/NoteDaemon/include/device_streaming_thread.h:
 
 /usr/include/boost/mpl/aux_/preprocessed/gcc/equal_to.hpp:
 
@@ -1737,15 +1750,11 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/mpl/aux_/preprocessed/gcc/apply.hpp:
 
-/usr/include/c++/13/vector:
+/usr/include/boost/lexical_cast/detail/inf_nan.hpp:
 
-/usr/include/openssl/rsa.h:
+/usr/include/c++/13/bits/ptr_traits.h:
 
-/usr/include/boost/type_traits/is_volatile.hpp:
-
-/usr/include/boost/integer_fwd.hpp:
-
-/usr/include/c++/13/bits/concept_check.h:
+/usr/include/boost/core/checked_delete.hpp:
 
 /usr/include/boost/math/cstdfloat/cstdfloat_complex_std.hpp:
 
@@ -1790,20 +1799,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/asm-generic/socket.h:
 
 /usr/include/x86_64-linux-gnu/sys/types.h:
-
-/usr/include/asm-generic/posix_types.h:
-
-/usr/include/boost/mpl/aux_/arity.hpp:
-
-/usr/include/boost/iterator/iterator_concepts.hpp:
-
-/usr/include/boost/preprocessor/arithmetic/limits/inc_256.hpp:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/avx512pfintrin.h:
-
-/usr/include/boost/mpl/aux_/preprocessed/gcc/full_lambda.hpp:
-
-/usr/include/x86_64-linux-gnu/bits/types/sigset_t.h:
 
 /usr/include/boost/preprocessor/seq/size.hpp:
 
@@ -1869,8 +1864,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /home/iospore/Dev/Netnotes/NoteDaemon/include/utils.h:
 
-/usr/include/boost/mpl/aux_/static_cast.hpp:
-
 /usr/include/x86_64-linux-gnu/sys/time.h:
 
 /usr/include/boost/limits.hpp:
@@ -1907,9 +1900,23 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/c++/13/bits/stl_numeric.h:
 
-/usr/include/boost/config/no_tr1/cmath.hpp:
+/usr/include/asm-generic/posix_types.h:
 
-/home/iospore/Dev/Netnotes/NoteDaemon/include/encryption.h:
+/usr/include/boost/mpl/aux_/arity.hpp:
+
+/usr/include/boost/iterator/iterator_concepts.hpp:
+
+/usr/include/boost/preprocessor/arithmetic/limits/inc_256.hpp:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/avx512pfintrin.h:
+
+/usr/include/boost/mpl/aux_/preprocessed/gcc/full_lambda.hpp:
+
+/usr/include/x86_64-linux-gnu/bits/types/sigset_t.h:
+
+/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:
+
+/usr/include/boost/type_traits/is_class.hpp:
 
 /usr/include/boost/math/special_functions/detail/fp_traits.hpp:
 
@@ -1926,12 +1933,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/c++/13/bits/locale_classes.tcc:
 
 /usr/include/boost/lexical_cast.hpp:
-
-/usr/include/boost/lexical_cast/detail/inf_nan.hpp:
-
-/usr/include/c++/13/bits/ptr_traits.h:
-
-/usr/include/boost/core/checked_delete.hpp:
 
 /usr/include/boost/current_function.hpp:
 
@@ -1983,6 +1984,10 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/config/detail/select_stdlib_config.hpp:
 
+/usr/include/boost/range/size.hpp:
+
+/usr/include/boost/cstdfloat.hpp:
+
 /usr/include/boost/config/helper_macros.hpp:
 
 /usr/include/boost/math/cstdfloat/cstdfloat_complex.hpp:
@@ -2007,19 +2012,9 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/x86_64-linux-gnu/c++/13/bits/cpu_defines.h:
 
-/usr/include/boost/concept/assert.hpp:
-
-/usr/include/boost/math/special_functions/next.hpp:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/stdarg.h:
-
 /usr/include/boost/iterator/iterator_categories.hpp:
 
 /usr/include/boost/detail/workaround.hpp:
-
-/usr/include/boost/mpl/aux_/preprocessed/gcc/or.hpp:
-
-/usr/include/asm-generic/bitsperlong.h:
 
 /usr/include/boost/mpl/apply_fwd.hpp:
 
@@ -2029,9 +2024,33 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /home/iospore/Dev/Netnotes/NoteDaemon/include/key_code.h:
 
+/usr/include/boost/mpl/aux_/static_cast.hpp:
+
+/usr/include/boost/integer_fwd.hpp:
+
+/usr/include/boost/type_traits/is_volatile.hpp:
+
+/usr/include/c++/13/bits/concept_check.h:
+
+/usr/include/c++/13/vector:
+
+/usr/include/openssl/rsa.h:
+
+/usr/include/boost/concept/assert.hpp:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/stdarg.h:
+
+/usr/include/boost/math/special_functions/next.hpp:
+
+/home/iospore/Dev/Netnotes/NoteDaemon/include/encryption.h:
+
+/usr/include/boost/config/no_tr1/cmath.hpp:
+
 /usr/include/boost/preprocessor/variadic/size.hpp:
 
 /usr/include/boost/core/cmath.hpp:
+
+/home/iospore/Dev/Netnotes/NoteDaemon/include/usb_device_descriptor.h:
 
 /usr/include/boost/mpl/aux_/template_arity.hpp:
 
@@ -2093,15 +2112,11 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/boost/config/detail/suffix.hpp:
 
-/usr/include/boost/numeric/conversion/detail/preprocessed/numeric_cast_traits_common.hpp:
+/usr/include/boost/math/tools/throw_exception.hpp:
 
-/usr/include/limits.h:
+/usr/include/c++/13/tr1/hypergeometric.tcc:
 
-/usr/include/boost/range/size.hpp:
-
-/usr/include/boost/cstdfloat.hpp:
-
-/usr/include/boost/type_traits/is_class.hpp:
+/usr/include/c++/13/bits/locale_facets.h:
 
 /usr/include/boost/predef/make.h:
 
@@ -2114,6 +2129,20 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/multiprecision/traits/is_variable_precision.hpp:
 
 /usr/include/boost/container/container_fwd.hpp:
+
+/usr/include/boost/math/special_functions/sign.hpp:
+
+/usr/include/boost/mpl/aux_/lambda_arity_param.hpp:
+
+/usr/include/x86_64-linux-gnu/bits/local_lim.h:
+
+/usr/include/asm-generic/bitsperlong.h:
+
+/usr/include/boost/mpl/aux_/preprocessed/gcc/or.hpp:
+
+/usr/include/boost/numeric/conversion/detail/preprocessed/numeric_cast_traits_common.hpp:
+
+/usr/include/limits.h:
 
 /usr/include/boost/mpl/aux_/na.hpp:
 
@@ -2134,10 +2163,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/mpl/and.hpp:
 
 /usr/include/boost/mpl/if.hpp:
-
-/usr/include/boost/mpl/quote.hpp:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/syslimits.h:
 
 /usr/include/boost/detail/indirect_traits.hpp:
 
@@ -2178,6 +2203,10 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/mpl/always.hpp:
 
 /usr/include/linux/limits.h:
+
+/usr/include/boost/mpl/protect.hpp:
+
+/usr/include/boost/multiprecision/traits/is_complex.hpp:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/amxfp16intrin.h:
 
@@ -2224,8 +2253,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/c++/13/bits/ranges_uninitialized.h:
 
 /usr/include/boost/mpl/aux_/preprocessed/gcc/bind.hpp:
-
-/usr/include/boost/multiprecision/detail/empty_value.hpp:
 
 /usr/include/boost/preprocessor/arithmetic/detail/div_base.hpp:
 
@@ -2303,20 +2330,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 
 /usr/include/c++/13/backward/auto_ptr.h:
 
-/usr/include/c++/13/tr1/hypergeometric.tcc:
-
-/usr/include/c++/13/bits/locale_facets.h:
-
-/usr/include/boost/math/tools/throw_exception.hpp:
-
-/usr/include/boost/multiprecision/traits/is_complex.hpp:
-
-/usr/include/boost/mpl/protect.hpp:
-
-/usr/include/x86_64-linux-gnu/bits/sigthread.h:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/avx512vbmivlintrin.h:
-
 /usr/include/boost/lexical_cast/detail/lcast_char_constants.hpp:
 
 /usr/include/boost/preprocessor/seq/transform.hpp:
@@ -2356,8 +2369,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/mpl/aux_/config/workaround.hpp:
 
 /usr/include/boost/mpl/aux_/has_apply.hpp:
-
-/usr/include/boost/preprocessor/facilities/identity.hpp:
 
 /usr/include/boost/mpl/or.hpp:
 
@@ -2450,6 +2461,8 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/boost/utility.hpp:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/avx512ifmavlintrin.h:
+
+/usr/include/boost/type_traits/make_void.hpp:
 
 /usr/include/boost/mpl/aux_/config/has_apply.hpp:
 
@@ -2812,8 +2825,6 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/include/x86_64-linux-gnu/bits/types/struct_sched_param.h:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/pkuintrin.h:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/tbmintrin.h:
 
 /usr/include/c++/13/optional:
 
@@ -3372,5 +3383,3 @@ CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon
 /usr/lib/gcc/x86_64-linux-gnu/13/include/prfchwintrin.h:
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/quadmath.h:
-
-/usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h:
