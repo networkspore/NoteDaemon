@@ -14,7 +14,6 @@
 #include <chrono>
 #include <syslog.h>
 #include "event_bytes.h"
-#include "notebytes.h"
 #include "input_packet.h"
 #include "key_code.h"
 

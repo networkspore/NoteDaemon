@@ -9,7 +9,6 @@
 #include "notebytes.h"
 #include "notebytes_reader.h"
 #include "event_bytes.h"
-#include "utils.h"
 #include <cstdint>
 #include <string>
 #include <vector>

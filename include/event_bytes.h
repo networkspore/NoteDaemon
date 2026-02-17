@@ -5,7 +5,6 @@
 #ifndef EVENT_BYTES_H
 #define EVENT_BYTES_H
 
-#include <cstdint>
 #include "notebytes.h"
 
 namespace EventBytes {
