@@ -29,7 +29,7 @@ inline const NoteBytes::Value EVENT_KEY_DOWN("key_down");
 inline const NoteBytes::Value EVENT_KEY_UP("key_up");
 inline const NoteBytes::Value EVENT_KEY_REPEAT("key_repeat");
 inline const NoteBytes::Value EVENT_KEY_CHAR("key_char");
-inline const NoteBytes::Value EVENT_KEY_CHAR_MODS("key_char_mods");
+//inline const NoteBytes::Value EVENT_KEY_CHAR_MODS("key_char_mods");
 
 // ===== CONTAINER / WINDOW EVENTS =====
 inline const NoteBytes::Value EVENT_FOCUS_GAINED("container_focus_gained");

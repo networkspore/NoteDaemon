@@ -15,7 +15,6 @@
 #include <syslog.h>
 #include "event_bytes.h"
 #include "notebytes.h"
-#include "atomic_sequence.h"
 #include "input_packet.h"
 #include "key_code.h"
 
@@ -173,7 +172,7 @@ private:
             int codepoint = calculate_codepoint(usage, state_flags);
             if (codepoint != 0) {
                 // Use EVENT_KEY_CHAR_MODS which includes modifier flags
-                auto key_char = factory_->create_key_char_mods(codepoint, state_flags);
+                auto key_char = factory_->create_key_char(codepoint, state_flags);
                 events.push_back(key_char);
             }
         }
@@ -233,11 +232,11 @@ private:
             auto key_repeat = factory_->create_key_repeat(virtual_key, scancode, state_flags);
             events.push_back(key_repeat);
             
-            // 2. Generate KEY_CHAR_MODS event if printable
+            // 2. Generate KEY_CHAR event if printable
             if (KeyCode::is_printable_key(usage)) {
                 int codepoint = calculate_codepoint(usage, state_flags);
                 if (codepoint != 0) {
-                    auto key_char = factory_->create_key_char_mods(codepoint, state_flags);
+                    auto key_char = factory_->create_key_char(codepoint, state_flags);
                     events.push_back(key_char);
                 }
             }

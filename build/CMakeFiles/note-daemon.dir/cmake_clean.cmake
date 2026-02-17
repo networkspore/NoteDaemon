@@ -1,4 +1,6 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/note-daemon.dir/src/device_session.cpp.o"
+  "CMakeFiles/note-daemon.dir/src/device_session.cpp.o.d"
   "CMakeFiles/note-daemon.dir/src/main.cpp.o"
   "CMakeFiles/note-daemon.dir/src/main.cpp.o.d"
   "note-daemon"

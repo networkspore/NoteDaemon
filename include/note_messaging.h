@@ -5,9 +5,7 @@
 #ifndef MESSAGING_H
 #define MESSAGING_H
 
-#include <cstdint>
 #include <map>
-#include <string>
 #include "notebytes.h"
 
 namespace NoteMessaging {
@@ -52,7 +50,9 @@ namespace NoteMessaging {
         
         inline const NoteBytes::Value DEVICE_DISCONNECTED("device_disconnected");
         inline const NoteBytes::Value RESUME("resume");
-        
+        inline const NoteBytes::Value DEVICE_ATTACHED("device_attached");
+        inline const NoteBytes::Value DEVICE_DETACHED("device_detached");
+
         // Encryption Lifecycle
         inline const NoteBytes::Value ENABLE_ENCRYPTION("enable_encryption");
         inline const NoteBytes::Value DISABLE_ENCRYPTION("disable_encryption");
@@ -64,6 +64,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value FAILED("failed");
         inline const NoteBytes::Value PROGRESS("progress");
         inline const NoteBytes::Value INFO("info");
+
         
         // State Changes
         inline const NoteBytes::Value STARTED("started");
@@ -84,6 +85,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value DEVICE_ID("device_id");
         inline const NoteBytes::Value ID("id");
         inline const NoteBytes::Value EVENT("event");
+        inline const NoteBytes::Value CONTROL("control");
         inline const NoteBytes::Value SEQUENCE("seq_id");
         inline const NoteBytes::Value SESSION_ID("session_id");
         inline const NoteBytes::Value PID("pid");
@@ -93,6 +95,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value CURRENT_MODE("current_mode");
         inline const NoteBytes::Value STATE_TYPE("state_type");
         inline const NoteBytes::Value IV("iv");
+        inline const NoteBytes::Value CORRELATION_ID("correlationId");
         
         // Metadata
         inline const NoteBytes::Value NAME("name");

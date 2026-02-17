@@ -69,33 +69,49 @@ include CMakeFiles/note-daemon.dir/progress.make
 # Include the compile flags for this target's objects.
 include CMakeFiles/note-daemon.dir/flags.make
 
+CMakeFiles/note-daemon.dir/src/device_session.cpp.o: CMakeFiles/note-daemon.dir/flags.make
+CMakeFiles/note-daemon.dir/src/device_session.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon/src/device_session.cpp
+CMakeFiles/note-daemon.dir/src/device_session.cpp.o: CMakeFiles/note-daemon.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/note-daemon.dir/src/device_session.cpp.o"
+	/usr/bin/g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/note-daemon.dir/src/device_session.cpp.o -MF CMakeFiles/note-daemon.dir/src/device_session.cpp.o.d -o CMakeFiles/note-daemon.dir/src/device_session.cpp.o -c /home/iospore/Dev/Netnotes/NoteDaemon/src/device_session.cpp
+
+CMakeFiles/note-daemon.dir/src/device_session.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/note-daemon.dir/src/device_session.cpp.i"
+	/usr/bin/g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/iospore/Dev/Netnotes/NoteDaemon/src/device_session.cpp > CMakeFiles/note-daemon.dir/src/device_session.cpp.i
+
+CMakeFiles/note-daemon.dir/src/device_session.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/note-daemon.dir/src/device_session.cpp.s"
+	/usr/bin/g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/iospore/Dev/Netnotes/NoteDaemon/src/device_session.cpp -o CMakeFiles/note-daemon.dir/src/device_session.cpp.s
+
 CMakeFiles/note-daemon.dir/src/main.cpp.o: CMakeFiles/note-daemon.dir/flags.make
 CMakeFiles/note-daemon.dir/src/main.cpp.o: /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp
 CMakeFiles/note-daemon.dir/src/main.cpp.o: CMakeFiles/note-daemon.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/note-daemon.dir/src/main.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/note-daemon.dir/src/main.cpp.o -MF CMakeFiles/note-daemon.dir/src/main.cpp.o.d -o CMakeFiles/note-daemon.dir/src/main.cpp.o -c /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/note-daemon.dir/src/main.cpp.o"
+	/usr/bin/g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/note-daemon.dir/src/main.cpp.o -MF CMakeFiles/note-daemon.dir/src/main.cpp.o.d -o CMakeFiles/note-daemon.dir/src/main.cpp.o -c /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp
 
 CMakeFiles/note-daemon.dir/src/main.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/note-daemon.dir/src/main.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp > CMakeFiles/note-daemon.dir/src/main.cpp.i
+	/usr/bin/g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp > CMakeFiles/note-daemon.dir/src/main.cpp.i
 
 CMakeFiles/note-daemon.dir/src/main.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/note-daemon.dir/src/main.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp -o CMakeFiles/note-daemon.dir/src/main.cpp.s
+	/usr/bin/g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp -o CMakeFiles/note-daemon.dir/src/main.cpp.s
 
 # Object files for target note-daemon
 note__daemon_OBJECTS = \
+"CMakeFiles/note-daemon.dir/src/device_session.cpp.o" \
 "CMakeFiles/note-daemon.dir/src/main.cpp.o"
 
 # External object files for target note-daemon
 note__daemon_EXTERNAL_OBJECTS =
 
+note-daemon: CMakeFiles/note-daemon.dir/src/device_session.cpp.o
 note-daemon: CMakeFiles/note-daemon.dir/src/main.cpp.o
 note-daemon: CMakeFiles/note-daemon.dir/build.make
 note-daemon: /usr/lib/x86_64-linux-gnu/libssl.so
 note-daemon: /usr/lib/x86_64-linux-gnu/libcrypto.so
 note-daemon: CMakeFiles/note-daemon.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable note-daemon"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable note-daemon"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/note-daemon.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

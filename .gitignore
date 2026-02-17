@@ -26,7 +26,7 @@ MinSizeRel/
 *.exe
 *.out
 *.app
-
+*.back
 # =========================
 # Dependency files
 # =========================
@@ -75,6 +75,8 @@ m4/
 # =========================
 .vscode/
 .idea/
+build/
+.cache
 *.swp
 *.swo
 *~
@@ -108,3 +110,4 @@ Desktop.ini
 *.core
 core
 vgcore.*
+

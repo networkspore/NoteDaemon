@@ -81,12 +81,12 @@ clean: CMakeFiles/note-daemon.dir/clean
 CMakeFiles/note-daemon.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=1,2 "Built target note-daemon"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=1,2,3 "Built target note-daemon"
 .PHONY : CMakeFiles/note-daemon.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/note-daemon.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 3
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/note-daemon.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
 .PHONY : CMakeFiles/note-daemon.dir/rule

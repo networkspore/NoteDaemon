@@ -11,12 +11,9 @@
 #include <syslog.h>
 #include <map>
 #include <memory>
-#include <thread>
 #include <string>
 #include <vector>
-#include <chrono>
 #include <atomic>
-#include <queue>
 #include <mutex>
 #include <condition_variable>
 #include <functional>
@@ -31,9 +28,7 @@ extern std::atomic<bool> g_running;
 #include "note_messaging.h"
 #include "notebytes.h"
 #include "notebytes_writer.h"
-#include "notebytes_reader.h"
 #include "event_bytes.h"
-#include "hid_parser.h"
 #include "encryption_protocol.h"
 #include "input_packet.h"
 
@@ -47,6 +42,11 @@ using namespace Capabilities;
 /**
  * Device Session - manages protocol and routing
  * Uses handler map pattern for O(1) message dispatch
+ * 
+ * HOTPLUG SUPPORT:
+ * - Static registry tracks all active sessions for broadcasting
+ * - libusb hotplug callbacks detect USB attach/detach
+ * - Notifications sent to ALL connected clients automatically
  */
 class DeviceSession {
 private:
@@ -70,6 +70,163 @@ private:
     std::unordered_map<NoteBytes::Value, Handler> routed_handlers_;
     std::unordered_map<NoteBytes::Value, Handler> routed_cmd_handlers_;
     
+    // ===== STATIC SESSION REGISTRY (for broadcasting) =====
+    static std::mutex& sessions_mutex();
+    static std::vector<DeviceSession*>& active_sessions();
+    /**
+     * Register this session for hotplug broadcasts
+     */
+    void register_session() {
+        std::lock_guard<std::mutex> lock(sessions_mutex());
+        active_sessions().push_back(this);
+        syslog(LOG_INFO, "Session registered for hotplug notifications (total: %zu)",
+            active_sessions().size());
+    }
+    
+    /**
+     * Unregister this session on destruction
+     */
+    void unregister_session() {
+        std::lock_guard<std::mutex> lock(sessions_mutex());
+        auto &vec = active_sessions();
+        vec.erase(std::remove(vec.begin(), vec.end(), this), vec.end());
+        syslog(LOG_INFO, "Session unregistered (total: %zu)", vec.size());
+    }
+    
+public:
+    /**
+     * Broadcast a message to all active sessions
+     * Used for DEVICE_ATTACHED/DETACHED hotplug notifications
+     */
+    static void broadcast_to_all_sessions(const NoteBytes::Object& msg) {
+        std::lock_guard<std::mutex> lock(sessions_mutex());
+        
+        for (DeviceSession* session : active_sessions()) {
+            if (session && session->client_fd >= 0) {
+                try {
+                    session->send_message(msg);
+                } catch (const std::exception& e) {
+                    syslog(LOG_WARNING, "Failed to broadcast to session pid=%d: %s",
+                           session->client_pid, e.what());
+                }
+            }
+        }
+        
+        syslog(LOG_DEBUG, "Broadcasted message to %zu sessions", active_sessions().size());
+    }
+    
+    /**
+     * libusb hotplug callback - called when USB device attached
+     * 
+     * NOTE: This runs in libusb's context, keep it fast!
+     */
+    static int LIBUSB_CALL hotplug_callback_attached(
+        libusb_context* ctx,
+        libusb_device* device,
+        libusb_hotplug_event event,
+        void* user_data)
+    {
+        (void)ctx;         // unused
+        (void)user_data;  // unused
+        
+        if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
+            uint8_t bus = libusb_get_bus_number(device);
+            uint8_t address = libusb_get_device_address(device);
+            std::string device_id = std::to_string(bus) + ":" + std::to_string(address);
+            
+            syslog(LOG_INFO, "USB device attached: %s", device_id.c_str());
+            
+            // Build descriptor for this device
+            auto device_desc = build_device_descriptor(device, device_id);
+            if (!device_desc) {
+                return 0;  // Not a HID device, ignore
+            }
+            
+            // Send DEVICE_ATTACHED to all clients
+            send_device_attached(device_id, device_desc);
+        }
+        
+        return 0;  // Continue receiving events
+    }
+    
+    /**
+     * libusb hotplug callback - called when USB device detached
+     */
+    static int LIBUSB_CALL hotplug_callback_detached(
+        libusb_context* ctx,
+        libusb_device* device,
+        libusb_hotplug_event event,
+        void* user_data)
+    {
+        (void)ctx;         // unused
+        (void)user_data;  // unused
+        
+        if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
+            uint8_t bus = libusb_get_bus_number(device);
+            uint8_t address = libusb_get_device_address(device);
+            std::string device_id = std::to_string(bus) + ":" + std::to_string(address);
+            
+            syslog(LOG_INFO, "USB device detached: %s", device_id.c_str());
+            
+            // Send DEVICE_DETACHED to all clients
+            send_device_detached(device_id);
+        }
+        
+        return 0;  // Continue receiving events
+    }
+    
+    /**
+     * Register libusb hotplug callbacks (call once at daemon startup)
+     */
+    static void register_hotplug_callbacks(libusb_context* ctx) {
+        if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
+            syslog(LOG_WARNING, "libusb hotplug not supported on this platform");
+            return;
+        }
+        
+        libusb_hotplug_callback_handle handle_attached, handle_detached;
+        
+        // Register for device arrivals
+        int rc = libusb_hotplug_register_callback(
+            ctx,
+            LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED,
+            LIBUSB_HOTPLUG_ENUMERATE,  // Also fire for existing devices
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            hotplug_callback_attached,
+            nullptr,
+            &handle_attached
+        );
+        
+        if (rc != LIBUSB_SUCCESS) {
+            syslog(LOG_ERR, "Failed to register hotplug callback (attached): %s",
+                   libusb_error_name(rc));
+        } else {
+            syslog(LOG_INFO, "Registered hotplug callback for USB device arrivals");
+        }
+        
+        // Register for device departures
+        rc = libusb_hotplug_register_callback(
+            ctx,
+            LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+            LIBUSB_HOTPLUG_NO_FLAGS,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            LIBUSB_HOTPLUG_MATCH_ANY,
+            hotplug_callback_detached,
+            nullptr,
+            &handle_detached
+        );
+        
+        if (rc != LIBUSB_SUCCESS) {
+            syslog(LOG_ERR, "Failed to register hotplug callback (detached): %s",
+                   libusb_error_name(rc));
+        } else {
+            syslog(LOG_INFO, "Registered hotplug callback for USB device departures");
+        }
+    }
+    
 public:
     DeviceSession(libusb_context* ctx, int client, pid_t pid) 
         : usb_ctx(ctx), client_fd(client), client_pid(pid) {
@@ -82,9 +239,15 @@ public:
         initialize_routed_cmd_handlers();
         
         discover_devices();
+        
+        // Register for hotplug broadcasts
+        register_session();
     }
     
     ~DeviceSession() {
+        // Unregister from hotplug broadcasts
+        unregister_session();
+        
         // Stop all streaming threads
         for (auto& [device_id, thread] : streaming_threads) {
             thread->stop();
@@ -174,10 +337,9 @@ private:
         routed_cmd_handlers_[NoteMessaging::ProtocolMessages::RESUME] = [this](const NoteBytes::Object& msg) {
             this->handle_resume(msg);
         };
-        
-        routed_cmd_handlers_[NoteMessaging::ProtocolMessages::DEVICE_DISCONNECTED] = [this](const NoteBytes::Object& msg) {
-            this->handle_device_disconnected(msg);
-        };
+        // NOTE: DEVICE_DISCONNECTED is sent *to* the client by the daemon (via
+        // notify_device_disconnected), not received from the client.
+        // The client-originated release path is RELEASE_ITEM -> handle_release_device.
     }
     
     // ===== MESSAGE DISPATCH =====
@@ -288,57 +450,77 @@ private:
     }
     
     /**
-     * Handle DEVICE_DISCONNECTED from client
+     * Notify the client that a USB device has physically disconnected.
+     *
+     * This is called by the streaming thread when libusb reports a disconnect
+     * (e.g. LIBUSB_ERROR_NO_DEVICE / LIBUSB_ERROR_IO).  It is NOT a terminal
+     * condition: the session infrastructure stays alive so that if the device
+     * is re-attached the client can reclaim it without tearing down the session.
+     *
+     * What we do here:
+     *   1. Stop the now-dead streaming thread (nothing to read from the device).
+     *   2. Close the libusb handle and release the interface (the device is gone).
+     *   3. Mark the DeviceState as disconnected (not released — keeps session aware).
+     *   4. Keep the device entry in available_devices so rediscovery can find it
+     *      again; the descriptor is reset to "not open" state.
+     *   5. Send DEVICE_DISCONNECTED to the client so the application layer can
+     *      react (show UI, retry logic, etc.).  The client is responsible for
+     *      deciding whether to call RELEASE_ITEM or wait for reattach.
      */
-    void handle_device_disconnected(const NoteBytes::Object& msg) {
-        std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, NoteMessaging::Keys::EMPTY);
-        
-        if (device_id.empty()) {
-            syslog(LOG_WARNING, "DEVICE_DISCONNECTED missing device_id");
-            return;
-        }
-        
-        syslog(LOG_INFO, "Client released device: %s", device_id.c_str());
-        
-        auto it = device_states.find(device_id);
-        if (it == device_states.end()) {
-            syslog(LOG_WARNING, "DEVICE_DISCONNECTED for unknown device: %s", 
+    void notify_device_disconnected(const std::string& device_id) {
+        syslog(LOG_INFO, "USB device physically disconnected: %s", device_id.c_str());
+
+        auto state_it = device_states.find(device_id);
+        if (state_it == device_states.end()) {
+            syslog(LOG_WARNING, "notify_device_disconnected for unknown device: %s",
                    device_id.c_str());
             return;
         }
-        
-        auto device_state = it->second;
-        
-        // Stop streaming thread
+
+        // 1. Stop the streaming thread — device is gone, nothing to read.
         auto thread_it = streaming_threads.find(device_id);
         if (thread_it != streaming_threads.end()) {
             thread_it->second->stop();
             streaming_threads.erase(thread_it);
         }
-        
-        // Clear encryption
-        device_encryptions_.erase(device_id);
-        
-        // Release USB resources
-        for (auto &kv : available_devices) {
-            if (kv.second->device_id == device_state->device_id) {
-                if (kv.second->handle) {
-                    libusb_release_interface(kv.second->handle, kv.second->interface_number);
-                    if (kv.second->kernel_driver_attached) {
-                        libusb_attach_kernel_driver(kv.second->handle, 
-                                                    kv.second->interface_number);
-                    }
-                    libusb_close(kv.second->handle);
-                    kv.second->handle = nullptr;
+
+        // 2. Close the libusb handle; leave the descriptor in available_devices
+        //    so rediscovery can pick it up when the device reattaches.
+        auto device_it = available_devices.find(device_id);
+        if (device_it != available_devices.end()) {
+            auto device_desc = device_it->second;
+            if (device_desc->handle) {
+                libusb_release_interface(device_desc->handle, device_desc->interface_number);
+                if (device_desc->kernel_driver_attached) {
+                    libusb_attach_kernel_driver(device_desc->handle,
+                                                device_desc->interface_number);
+                    device_desc->kernel_driver_attached = false;
                 }
-                break;
+                libusb_close(device_desc->handle);
+                device_desc->handle = nullptr;
             }
+            // Keep the descriptor entry — it will be reusable after reattach.
         }
-        
-        it->second->release();
-        device_states.erase(it);
-        
-        syslog(LOG_INFO, "Cleaned up device after client release: %s", device_id.c_str());
+
+        // 3. Mark device state as disconnected but do NOT erase it or clear
+        //    encryption — the session may reconnect the same physical device.
+        state_it->second->state.remove_flag(State::DeviceFlags::CLAIMED);
+        state_it->second->state.add_flag(State::DeviceFlags::DISCONNECTED);
+
+        // 4. Notify the client.  DEVICE_DISCONNECTED is informational — the
+        //    application decides what to do next (release or wait for reattach).
+        NoteBytes::Object notification;
+        notification.add(NoteMessaging::Keys::EVENT,
+                         NoteMessaging::ProtocolMessages::DEVICE_DISCONNECTED);
+        notification.add(NoteMessaging::Keys::DEVICE_ID, device_id);
+        notification.add(NoteMessaging::Keys::MSG,
+                         std::string("USB device physically disconnected"));
+
+        send_message(notification);
+
+        syslog(LOG_INFO,
+               "Sent DEVICE_DISCONNECTED for %s; infrastructure kept for potential reattach",
+               device_id.c_str());
     }
     
     // ===== COMMAND HANDLERS =====
@@ -399,13 +581,9 @@ private:
         }
     }
     
-    // ... (rest of the handlers - send_device_list, handle_claim_device, etc.)
-    // These remain largely unchanged but use the new constants
-    
     void send_device_list() {
         NoteBytes::Object response;
         response.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_CMD);
-        response.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         response.add(NoteMessaging::Keys::CMD, NoteMessaging::ProtocolMessages::ITEM_LIST);
         
         NoteBytes::Array devices_array;
@@ -439,18 +617,40 @@ private:
     void send_accept(const std::string& status = "ok") {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
-        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         msg.add(NoteMessaging::Keys::STATUS, status);
         
         send_message(msg);
     }
-    
-    void send_error(int code, const std::string& message) {
+
+    void send_error(
+        const NoteBytes::Value& event, 
+        const std::string& device_id, 
+        int code, 
+        const std::string& message, 
+        const std::string& correlation_id = "") {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
-        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
+        msg.add(NoteMessaging::Keys::EVENT, event);
         msg.add(NoteMessaging::Keys::ERROR_CODE, code);
         msg.add(NoteMessaging::Keys::MSG, message);
+        msg.add(NoteMessaging::Keys::DEVICE_ID, device_id);
+        if (!correlation_id.empty()) {
+            msg.add(NoteMessaging::Keys::CORRELATION_ID, correlation_id);
+        }
+        
+        send_message(msg);
+        
+        syslog(LOG_ERR, "Error %d: %s", code, message.c_str());
+    }
+    
+    
+    void send_error(int code, const std::string& message, const std::string& correlation_id = "") {
+        NoteBytes::Object msg;
+        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
+        msg.add(NoteMessaging::Keys::ERROR_CODE, code);
+        msg.add(NoteMessaging::Keys::MSG, message);
+        if (!correlation_id.empty()) {
+            msg.add(NoteMessaging::Keys::CORRELATION_ID, correlation_id);
+        }
         
         send_message(msg);
         
@@ -460,7 +660,6 @@ private:
     void send_pong() {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_PONG);
-        msg.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         
         send_message(msg);
     }
@@ -470,11 +669,95 @@ private:
     bool ensure_owner(const std::shared_ptr<DeviceState>& device_state) {
         if (!device_state) return false;
         if (device_state->owner_pid != client_pid) {
-            send_error(NoteMessaging::ErrorCodes::PID_MISMATCH, 
-                      "PID mismatch: operation not permitted");
             return false;
         }
         return true;
+    }
+    
+    /**
+     * Build a device descriptor from a libusb_device (static helper for hotplug)
+     * Returns nullptr if device is not a HID device
+     */
+    static std::shared_ptr<USBDeviceDescriptor> build_device_descriptor(
+        libusb_device* device,
+        const std::string& device_id)
+    {
+        struct libusb_device_descriptor desc;
+        int result = libusb_get_device_descriptor(device, &desc);
+        if (result != LIBUSB_SUCCESS) {
+            syslog(LOG_WARNING, "Failed to get device descriptor for %s: %s",
+                   device_id.c_str(), libusb_error_name(result));
+            return nullptr;
+        }
+        
+        // Check if this is a HID device (interface class 3)
+        bool is_hid_device = false;
+        libusb_config_descriptor* config = nullptr;
+        
+        if (libusb_get_active_config_descriptor(device, &config) == LIBUSB_SUCCESS) {
+            for (int j = 0; j < config->bNumInterfaces; ++j) {
+                const struct libusb_interface* interface = &config->interface[j];
+                if (interface->num_altsetting > 0) {
+                    const struct libusb_interface_descriptor* altsetting = &interface->altsetting[0];
+                    if (altsetting->bInterfaceClass == LIBUSB_CLASS_HID) {
+                        is_hid_device = true;
+                        break;
+                    }
+                }
+            }
+            libusb_free_config_descriptor(config);
+        }
+        
+        if (!is_hid_device) {
+            return nullptr;  // Not a HID device, skip
+        }
+        
+        // Create descriptor
+        auto device_desc = std::make_shared<USBDeviceDescriptor>();
+        device_desc->handle = nullptr;  // Will be opened when claimed
+        device_desc->interface_number = 0;  // Usually 0 for HID
+        device_desc->kernel_driver_attached = false;
+        device_desc->device_id = device_id;
+        
+        return device_desc;
+    }
+    
+    /**
+     * Send DEVICE_ATTACHED notification to all clients
+     */
+    static void send_device_attached(
+        const std::string& device_id,
+        const std::shared_ptr<USBDeviceDescriptor>& device_desc)
+    {
+        NoteBytes::Object notification;
+        notification.add(NoteMessaging::Keys::EVENT, 
+                        NoteMessaging::ProtocolMessages::DEVICE_ATTACHED);
+        notification.add(NoteMessaging::Keys::DEVICE_ID, device_id);
+        
+        // Include full device descriptor (same format as ITEM_LIST entries)
+        // Java side will parse this via DiscoveredDeviceRegistry.addOrUpdateDevice()
+        auto device_obj = device_desc->to_notebytes();
+        notification.add(NoteMessaging::ProtocolMessages::ITEM_INFO, device_obj.as_value());
+        
+        broadcast_to_all_sessions(notification);
+        
+        syslog(LOG_INFO, "Sent DEVICE_ATTACHED for %s to all sessions", 
+               device_id.c_str());
+    }
+    
+    /**
+     * Send DEVICE_DETACHED notification to all clients
+     */
+    static void send_device_detached(const std::string& device_id) {
+        NoteBytes::Object notification;
+        notification.add(NoteMessaging::Keys::EVENT,
+                        NoteMessaging::ProtocolMessages::DEVICE_DETACHED);
+        notification.add(NoteMessaging::Keys::DEVICE_ID, device_id);
+        
+        broadcast_to_all_sessions(notification);
+        
+        syslog(LOG_INFO, "Sent DEVICE_DETACHED for %s to all sessions",
+               device_id.c_str());
     }
     
     void release_all_devices() {
@@ -583,16 +866,24 @@ private:
 
     void handle_claim_device(const NoteBytes::Object& msg) {
         std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, NoteMessaging::Keys::EMPTY);
+        std::string correlation_id = msg.get_string(NoteMessaging::Keys::CORRELATION_ID, NoteMessaging::Keys::EMPTY);
+        
+        if (correlation_id.empty()) {
+            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing correlation_id");
+            return;
+        }
+
         if (device_id.empty()) {
-            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing device_id");
+            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing device_id", correlation_id);
             return;
         }
 
         // Check if device exists and is available
         auto device_it = available_devices.find(device_id);
         if (device_it == available_devices.end()) {
-            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
-                      "Device not found: " + device_id);
+            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
+                      "Device not found: " + device_id,
+                      correlation_id);
             return;
         }
 
@@ -600,8 +891,9 @@ private:
 
         // Check if already claimed
         if (device_states.find(device_id) != device_states.end()) {
-            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_AVAILABLE,
-                      "Device already claimed: " + device_id);
+            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::ITEM_NOT_AVAILABLE,
+                      "Device already claimed: " + device_id,
+                      correlation_id);
             return;
         }
 
@@ -622,8 +914,9 @@ private:
 
         if (!usb_device) {
             libusb_free_device_list(device_list, 1);
-            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
-                      "USB device not found: " + device_id);
+            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
+                      "USB device not found: " + device_id,
+                      correlation_id);
             return;
         }
 
@@ -633,8 +926,9 @@ private:
         libusb_free_device_list(device_list, 1);
 
         if (result != LIBUSB_SUCCESS) {
-            send_error(NoteMessaging::ErrorCodes::PERMISSION_DENIED,
-                      "Cannot open device " + device_id + ": " + libusb_error_name(result));
+            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::PERMISSION_DENIED,
+                      "Cannot open device " + device_id + ": " + libusb_error_name(result),
+                      correlation_id);
             return;
         }
 
@@ -642,8 +936,9 @@ private:
         result = libusb_claim_interface(handle, device_desc->interface_number);
         if (result != LIBUSB_SUCCESS) {
             libusb_close(handle);
-            send_error(NoteMessaging::ErrorCodes::PERMISSION_DENIED,
-                      "Cannot claim interface for device " + device_id + ": " + libusb_error_name(result));
+            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::PERMISSION_DENIED,
+                      "Cannot claim interface for device " + device_id + ": " + libusb_error_name(result),
+                      correlation_id);
             return;
         }
 
@@ -682,9 +977,9 @@ private:
 
         // Send success response
         NoteBytes::Object response;
-        response.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
-        response.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
+        response.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::ITEM_CLAIMED);
         response.add(NoteMessaging::Keys::DEVICE_ID, device_id);
+        response.add(NoteMessaging::Keys::CORRELATION_ID, correlation_id);
         response.add(NoteMessaging::Keys::STATUS, "claimed");
 
         send_message(response);
@@ -692,21 +987,35 @@ private:
 
     void handle_release_device(const NoteBytes::Object& msg) {
         std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, NoteMessaging::Keys::EMPTY);
+        std::string correlation_id = msg.get_string(NoteMessaging::Keys::CORRELATION_ID, NoteMessaging::Keys::EMPTY);
+        
+        if (correlation_id.empty()) {
+            
+            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing correlation_id");
+            return;
+        }
+        
         if (device_id.empty()) {
-            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing device_id");
+            send_error(NoteMessaging::ErrorCodes::INVALID_MESSAGE, "Missing device_id", correlation_id);
             return;
         }
 
         // Check if device is claimed by this client
         auto state_it = device_states.find(device_id);
         if (state_it == device_states.end()) {
-            send_error(NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
-                      "Device not claimed: " + device_id);
+            send_error(NoteMessaging::ProtocolMessages::ITEM_RELEASED, device_id, NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
+                      "Device not claimed: " + device_id,
+                      correlation_id);
             return;
         }
 
         auto device_state = state_it->second;
-        if (!ensure_owner(device_state)) return;
+        if (!ensure_owner(device_state)){
+            send_error(NoteMessaging::ProtocolMessages::ITEM_RELEASED,
+                device_id, NoteMessaging::ErrorCodes::PERMISSION_DENIED,
+                "Not owner of: " + device_id,
+                correlation_id);
+        }
 
         // Stop streaming thread
         auto thread_it = streaming_threads.find(device_id);
@@ -753,10 +1062,10 @@ private:
 
         // Send success response
         NoteBytes::Object response;
-        response.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
-        response.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
+        response.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::ITEM_RELEASED);
         response.add(NoteMessaging::Keys::DEVICE_ID, device_id);
-        response.add(NoteMessaging::Keys::STATUS, "released");
+        response.add(NoteMessaging::Keys::CORRELATION_ID, correlation_id);
+        response.add(NoteMessaging::Keys::STATUS, NoteMessaging::ProtocolMessages::SUCCESS);
 
         send_message(response);
     }

@@ -8,6 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
+  "/home/iospore/Dev/Netnotes/NoteDaemon/src/device_session.cpp" "CMakeFiles/note-daemon.dir/src/device_session.cpp.o" "gcc" "CMakeFiles/note-daemon.dir/src/device_session.cpp.o.d"
   "/home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp" "CMakeFiles/note-daemon.dir/src/main.cpp.o" "gcc" "CMakeFiles/note-daemon.dir/src/main.cpp.o.d"
   )
 

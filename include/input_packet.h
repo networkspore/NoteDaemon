@@ -9,7 +9,6 @@
 #include "notebytes.h"
 #include "notebytes_reader.h"
 #include "event_bytes.h"
-#include "atomic_sequence.h"
 #include "utils.h"
 #include <cstdint>
 #include <string>
@@ -74,8 +73,7 @@ public:
         
         // Add required fields
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
-        packet.add(NoteMessaging::Keys::EVENT, event_type);  // Already a Value!
-        packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
+        packet.add(NoteMessaging::Keys::EVENT, event_type);
         
         // Add state flags if non-zero
         if (state_flags != 0) {
@@ -125,13 +123,6 @@ public:
             NoteBytes::Value(codepoint)
         };
         return create(EventBytes::EVENT_KEY_CHAR, state_flags, &payload);
-    }
-    
-    std::vector<uint8_t> create_key_char_mods(int codepoint, int state_flags) {
-        std::vector<NoteBytes::Value> payload = {
-            NoteBytes::Value(codepoint)
-        };
-        return create(EventBytes::EVENT_KEY_CHAR_MODS, state_flags, &payload);
     }
     
     // ===== Mouse Event Creators =====
@@ -214,7 +205,6 @@ public:
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
         packet.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
-        packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         packet.add(NoteMessaging::Keys::ERROR_CODE, error_code);
         packet.add(NoteMessaging::Keys::MSG, message);
         
@@ -225,7 +215,6 @@ public:
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
         packet.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
-        packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         packet.add(NoteMessaging::Keys::STATUS, status);
         
         return packet.serialize_with_header();
@@ -237,7 +226,6 @@ public:
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
         packet.add(NoteMessaging::Keys::EVENT, EventBytes::EVENT_KEY_DOWN);
-        packet.add(NoteMessaging::Keys::SEQUENCE, AtomicSequence64::get_next());
         packet.add(NoteMessaging::Keys::ENCRYPTION, true);
         packet.add(NoteMessaging::Keys::CIPHER, 
                   NoteBytes::Value(ciphertext, len, NoteBytes::Type::RAW_BYTES));

@@ -3,7 +3,6 @@
 
 CMakeFiles/note-daemon.dir/src/main.cpp.o
  /home/iospore/Dev/Netnotes/NoteDaemon/src/main.cpp
- /home/iospore/Dev/Netnotes/NoteDaemon/include/atomic_sequence.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/bitflag_state_bigint.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/capability_registry.h
  /home/iospore/Dev/Netnotes/NoteDaemon/include/device_session.h

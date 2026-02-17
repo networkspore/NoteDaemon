@@ -76,7 +76,7 @@ public:
     }
 
      static bool can_access_any_usb_device() {
-        libusb_device **devs;
+        libusb_device **devs = nullptr;
         libusb_context* ctx = nullptr;
         int rc = libusb_init(&ctx);
         if (rc < 0) {

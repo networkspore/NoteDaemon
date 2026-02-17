@@ -174,6 +174,30 @@ note-daemon/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/build
 .PHONY : note-daemon/fast
 
+src/device_session.o: src/device_session.cpp.o
+.PHONY : src/device_session.o
+
+# target to build an object file
+src/device_session.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/src/device_session.cpp.o
+.PHONY : src/device_session.cpp.o
+
+src/device_session.i: src/device_session.cpp.i
+.PHONY : src/device_session.i
+
+# target to preprocess a source file
+src/device_session.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/src/device_session.cpp.i
+.PHONY : src/device_session.cpp.i
+
+src/device_session.s: src/device_session.cpp.s
+.PHONY : src/device_session.s
+
+# target to generate assembly for a file
+src/device_session.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/src/device_session.cpp.s
+.PHONY : src/device_session.cpp.s
+
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
 
@@ -211,6 +235,9 @@ help:
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
 	@echo "... note-daemon"
+	@echo "... src/device_session.o"
+	@echo "... src/device_session.i"
+	@echo "... src/device_session.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
