@@ -53,3 +53,6 @@ message(STATUS "note-daemon Version: ${PROJECT_VERSION}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "LibUSB Version: ${LIBUSB_VERSION}")
 message(STATUS "OpenSSL Version: ${OPENSSL_VERSION}")
+
+# Add tests subdirectory
+add_subdirectory(tests)

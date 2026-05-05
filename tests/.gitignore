@@ -1,0 +1,31 @@
+# Build directories
+build/
+bin/
+
+# Compiled object files
+*.o
+*.obj
+*.ko
+*.elf
+
+# Compiled dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled static libraries
+*.a
+*.lib
+
+# Executables
+note-daemon-tests
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Google Test
+googletest/
