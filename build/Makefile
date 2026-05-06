@@ -188,6 +188,123 @@ note-daemon-tests/fast:
 .PHONY : note-daemon-tests/fast
 
 #=============================================================================
+# Target rules for targets named live_keyboard_test
+
+# Build rule for target.
+live_keyboard_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 live_keyboard_test
+.PHONY : live_keyboard_test
+
+# fast build rule for target.
+live_keyboard_test/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/live_keyboard_test.dir/build.make tests/CMakeFiles/live_keyboard_test.dir/build
+.PHONY : live_keyboard_test/fast
+
+#=============================================================================
+# Target rules for targets named diagnose_keyboard
+
+# Build rule for target.
+diagnose_keyboard: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 diagnose_keyboard
+.PHONY : diagnose_keyboard
+
+# fast build rule for target.
+diagnose_keyboard/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/diagnose_keyboard.dir/build.make tests/CMakeFiles/diagnose_keyboard.dir/build
+.PHONY : diagnose_keyboard/fast
+
+#=============================================================================
+# Target rules for targets named raw_stream_capture
+
+# Build rule for target.
+raw_stream_capture: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 raw_stream_capture
+.PHONY : raw_stream_capture
+
+# fast build rule for target.
+raw_stream_capture/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/raw_stream_capture.dir/build.make tests/CMakeFiles/raw_stream_capture.dir/build
+.PHONY : raw_stream_capture/fast
+
+#=============================================================================
+# Target rules for targets named proper_8byte_capture
+
+# Build rule for target.
+proper_8byte_capture: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 proper_8byte_capture
+.PHONY : proper_8byte_capture
+
+# fast build rule for target.
+proper_8byte_capture/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/proper_8byte_capture.dir/build.make tests/CMakeFiles/proper_8byte_capture.dir/build
+.PHONY : proper_8byte_capture/fast
+
+#=============================================================================
+# Target rules for targets named keyboard_streaming_demo
+
+# Build rule for target.
+keyboard_streaming_demo: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 keyboard_streaming_demo
+.PHONY : keyboard_streaming_demo
+
+# fast build rule for target.
+keyboard_streaming_demo/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_streaming_demo.dir/build.make tests/CMakeFiles/keyboard_streaming_demo.dir/build
+.PHONY : keyboard_streaming_demo/fast
+
+#=============================================================================
+# Target rules for targets named parse_keyboard_log
+
+# Build rule for target.
+parse_keyboard_log: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 parse_keyboard_log
+.PHONY : parse_keyboard_log
+
+# fast build rule for target.
+parse_keyboard_log/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/parse_keyboard_log.dir/build.make tests/CMakeFiles/parse_keyboard_log.dir/build
+.PHONY : parse_keyboard_log/fast
+
+#=============================================================================
+# Target rules for targets named keyboard_capture_module
+
+# Build rule for target.
+keyboard_capture_module: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 keyboard_capture_module
+.PHONY : keyboard_capture_module
+
+# fast build rule for target.
+keyboard_capture_module/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_module.dir/build.make tests/CMakeFiles/keyboard_capture_module.dir/build
+.PHONY : keyboard_capture_module/fast
+
+#=============================================================================
+# Target rules for targets named keyboard_capture_demo
+
+# Build rule for target.
+keyboard_capture_demo: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 keyboard_capture_demo
+.PHONY : keyboard_capture_demo
+
+# fast build rule for target.
+keyboard_capture_demo/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_demo.dir/build.make tests/CMakeFiles/keyboard_capture_demo.dir/build
+.PHONY : keyboard_capture_demo/fast
+
+#=============================================================================
+# Target rules for targets named analyze_keyboard_polling
+
+# Build rule for target.
+analyze_keyboard_polling: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 analyze_keyboard_polling
+.PHONY : analyze_keyboard_polling
+
+# fast build rule for target.
+analyze_keyboard_polling/fast:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/analyze_keyboard_polling.dir/build.make tests/CMakeFiles/analyze_keyboard_polling.dir/build
+.PHONY : analyze_keyboard_polling/fast
+
+#=============================================================================
 # Target rules for targets named gmock
 
 # Build rule for target.
@@ -299,12 +416,21 @@ help:
 	@echo "... install/strip"
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
+	@echo "... analyze_keyboard_polling"
+	@echo "... diagnose_keyboard"
 	@echo "... gmock"
 	@echo "... gmock_main"
 	@echo "... gtest"
 	@echo "... gtest_main"
+	@echo "... keyboard_capture_demo"
+	@echo "... keyboard_capture_module"
+	@echo "... keyboard_streaming_demo"
+	@echo "... live_keyboard_test"
 	@echo "... note-daemon"
 	@echo "... note-daemon-tests"
+	@echo "... parse_keyboard_log"
+	@echo "... proper_8byte_capture"
+	@echo "... raw_stream_capture"
 	@echo "... src/device_session.o"
 	@echo "... src/device_session.i"
 	@echo "... src/device_session.s"

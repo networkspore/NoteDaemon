@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <cstring>
+#include <openssl/crypto.h>
 
 // Mock encryption context for testing
 class MockAEADContext {
@@ -63,7 +64,7 @@ TEST_F(EncryptionTest, Zeroization) {
     uint8_t sensitive_data[64];
     std::memset(sensitive_data, 0xAA, sizeof(sensitive_data));
 
-    zeroize(sensitive_data, sizeof(sensitive_data));
+    OPENSSL_cleanse(sensitive_data, sizeof(sensitive_data));
 
     for (size_t i = 0; i < sizeof(sensitive_data); i++) {
         EXPECT_EQ(sensitive_data[i], 0) << "Byte " << i << " should be zeroized";

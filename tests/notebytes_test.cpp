@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <cstring>
+#include <openssl/crypto.h>
 
 class NoteBytesTest : public ::testing::Test {
 protected:
@@ -29,7 +30,7 @@ TEST_F(NoteBytesTest, Zeroization) {
     uint8_t data[64];
     std::memset(data, 0xAA, sizeof(data));
 
-    zeroize(data, sizeof(data));
+    OPENSSL_cleanse(data, sizeof(data));
 
     for (size_t i = 0; i < sizeof(data); i++) {
         EXPECT_EQ(data[i], 0) << "Byte " << i << " should be zeroized";

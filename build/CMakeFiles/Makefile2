@@ -132,6 +132,15 @@ _deps/googletest-build/googletest/clean: _deps/googletest-build/googletest/CMake
 
 # Recursive "all" directory target.
 tests/all: tests/CMakeFiles/note-daemon-tests.dir/all
+tests/all: tests/CMakeFiles/live_keyboard_test.dir/all
+tests/all: tests/CMakeFiles/diagnose_keyboard.dir/all
+tests/all: tests/CMakeFiles/raw_stream_capture.dir/all
+tests/all: tests/CMakeFiles/proper_8byte_capture.dir/all
+tests/all: tests/CMakeFiles/keyboard_streaming_demo.dir/all
+tests/all: tests/CMakeFiles/parse_keyboard_log.dir/all
+tests/all: tests/CMakeFiles/keyboard_capture_module.dir/all
+tests/all: tests/CMakeFiles/keyboard_capture_demo.dir/all
+tests/all: tests/CMakeFiles/analyze_keyboard_polling.dir/all
 tests/all: _deps/googletest-build/all
 .PHONY : tests/all
 
@@ -141,6 +150,15 @@ tests/preinstall: _deps/googletest-build/preinstall
 
 # Recursive "clean" directory target.
 tests/clean: tests/CMakeFiles/note-daemon-tests.dir/clean
+tests/clean: tests/CMakeFiles/live_keyboard_test.dir/clean
+tests/clean: tests/CMakeFiles/diagnose_keyboard.dir/clean
+tests/clean: tests/CMakeFiles/raw_stream_capture.dir/clean
+tests/clean: tests/CMakeFiles/proper_8byte_capture.dir/clean
+tests/clean: tests/CMakeFiles/keyboard_streaming_demo.dir/clean
+tests/clean: tests/CMakeFiles/parse_keyboard_log.dir/clean
+tests/clean: tests/CMakeFiles/keyboard_capture_module.dir/clean
+tests/clean: tests/CMakeFiles/keyboard_capture_demo.dir/clean
+tests/clean: tests/CMakeFiles/analyze_keyboard_polling.dir/clean
 tests/clean: _deps/googletest-build/clean
 .PHONY : tests/clean
 
@@ -151,7 +169,7 @@ tests/clean: _deps/googletest-build/clean
 CMakeFiles/note-daemon.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/note-daemon.dir/build.make CMakeFiles/note-daemon.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=9,10,11 "Built target note-daemon"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=21,22,23 "Built target note-daemon"
 .PHONY : CMakeFiles/note-daemon.dir/all
 
 # Build rule for subdir invocation for target.
@@ -174,11 +192,11 @@ CMakeFiles/note-daemon.dir/clean:
 # Target rules for target tests/CMakeFiles/note-daemon-tests.dir
 
 # All Build rule for target.
-tests/CMakeFiles/note-daemon-tests.dir/all: _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/all
 tests/CMakeFiles/note-daemon-tests.dir/all: _deps/googletest-build/googletest/CMakeFiles/gtest.dir/all
+tests/CMakeFiles/note-daemon-tests.dir/all: _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/all
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/note-daemon-tests.dir/build.make tests/CMakeFiles/note-daemon-tests.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/note-daemon-tests.dir/build.make tests/CMakeFiles/note-daemon-tests.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=12,13,14,15,16,17 "Built target note-daemon-tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=24,25,26,27,28,29 "Built target note-daemon-tests"
 .PHONY : tests/CMakeFiles/note-daemon-tests.dir/all
 
 # Build rule for subdir invocation for target.
@@ -198,13 +216,247 @@ tests/CMakeFiles/note-daemon-tests.dir/clean:
 .PHONY : tests/CMakeFiles/note-daemon-tests.dir/clean
 
 #=============================================================================
+# Target rules for target tests/CMakeFiles/live_keyboard_test.dir
+
+# All Build rule for target.
+tests/CMakeFiles/live_keyboard_test.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/live_keyboard_test.dir/build.make tests/CMakeFiles/live_keyboard_test.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/live_keyboard_test.dir/build.make tests/CMakeFiles/live_keyboard_test.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=19,20 "Built target live_keyboard_test"
+.PHONY : tests/CMakeFiles/live_keyboard_test.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/live_keyboard_test.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/live_keyboard_test.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/live_keyboard_test.dir/rule
+
+# Convenience name for target.
+live_keyboard_test: tests/CMakeFiles/live_keyboard_test.dir/rule
+.PHONY : live_keyboard_test
+
+# clean rule for target.
+tests/CMakeFiles/live_keyboard_test.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/live_keyboard_test.dir/build.make tests/CMakeFiles/live_keyboard_test.dir/clean
+.PHONY : tests/CMakeFiles/live_keyboard_test.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/diagnose_keyboard.dir
+
+# All Build rule for target.
+tests/CMakeFiles/diagnose_keyboard.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/diagnose_keyboard.dir/build.make tests/CMakeFiles/diagnose_keyboard.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/diagnose_keyboard.dir/build.make tests/CMakeFiles/diagnose_keyboard.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=3,4 "Built target diagnose_keyboard"
+.PHONY : tests/CMakeFiles/diagnose_keyboard.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/diagnose_keyboard.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/diagnose_keyboard.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/diagnose_keyboard.dir/rule
+
+# Convenience name for target.
+diagnose_keyboard: tests/CMakeFiles/diagnose_keyboard.dir/rule
+.PHONY : diagnose_keyboard
+
+# clean rule for target.
+tests/CMakeFiles/diagnose_keyboard.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/diagnose_keyboard.dir/build.make tests/CMakeFiles/diagnose_keyboard.dir/clean
+.PHONY : tests/CMakeFiles/diagnose_keyboard.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/raw_stream_capture.dir
+
+# All Build rule for target.
+tests/CMakeFiles/raw_stream_capture.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/raw_stream_capture.dir/build.make tests/CMakeFiles/raw_stream_capture.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/raw_stream_capture.dir/build.make tests/CMakeFiles/raw_stream_capture.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=34,35 "Built target raw_stream_capture"
+.PHONY : tests/CMakeFiles/raw_stream_capture.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/raw_stream_capture.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/raw_stream_capture.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/raw_stream_capture.dir/rule
+
+# Convenience name for target.
+raw_stream_capture: tests/CMakeFiles/raw_stream_capture.dir/rule
+.PHONY : raw_stream_capture
+
+# clean rule for target.
+tests/CMakeFiles/raw_stream_capture.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/raw_stream_capture.dir/build.make tests/CMakeFiles/raw_stream_capture.dir/clean
+.PHONY : tests/CMakeFiles/raw_stream_capture.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/proper_8byte_capture.dir
+
+# All Build rule for target.
+tests/CMakeFiles/proper_8byte_capture.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/proper_8byte_capture.dir/build.make tests/CMakeFiles/proper_8byte_capture.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/proper_8byte_capture.dir/build.make tests/CMakeFiles/proper_8byte_capture.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=32,33 "Built target proper_8byte_capture"
+.PHONY : tests/CMakeFiles/proper_8byte_capture.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/proper_8byte_capture.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/proper_8byte_capture.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/proper_8byte_capture.dir/rule
+
+# Convenience name for target.
+proper_8byte_capture: tests/CMakeFiles/proper_8byte_capture.dir/rule
+.PHONY : proper_8byte_capture
+
+# clean rule for target.
+tests/CMakeFiles/proper_8byte_capture.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/proper_8byte_capture.dir/build.make tests/CMakeFiles/proper_8byte_capture.dir/clean
+.PHONY : tests/CMakeFiles/proper_8byte_capture.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/keyboard_streaming_demo.dir
+
+# All Build rule for target.
+tests/CMakeFiles/keyboard_streaming_demo.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_streaming_demo.dir/build.make tests/CMakeFiles/keyboard_streaming_demo.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_streaming_demo.dir/build.make tests/CMakeFiles/keyboard_streaming_demo.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=17,18 "Built target keyboard_streaming_demo"
+.PHONY : tests/CMakeFiles/keyboard_streaming_demo.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/keyboard_streaming_demo.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/keyboard_streaming_demo.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/keyboard_streaming_demo.dir/rule
+
+# Convenience name for target.
+keyboard_streaming_demo: tests/CMakeFiles/keyboard_streaming_demo.dir/rule
+.PHONY : keyboard_streaming_demo
+
+# clean rule for target.
+tests/CMakeFiles/keyboard_streaming_demo.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_streaming_demo.dir/build.make tests/CMakeFiles/keyboard_streaming_demo.dir/clean
+.PHONY : tests/CMakeFiles/keyboard_streaming_demo.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/parse_keyboard_log.dir
+
+# All Build rule for target.
+tests/CMakeFiles/parse_keyboard_log.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/parse_keyboard_log.dir/build.make tests/CMakeFiles/parse_keyboard_log.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/parse_keyboard_log.dir/build.make tests/CMakeFiles/parse_keyboard_log.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=30,31 "Built target parse_keyboard_log"
+.PHONY : tests/CMakeFiles/parse_keyboard_log.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/parse_keyboard_log.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/parse_keyboard_log.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/parse_keyboard_log.dir/rule
+
+# Convenience name for target.
+parse_keyboard_log: tests/CMakeFiles/parse_keyboard_log.dir/rule
+.PHONY : parse_keyboard_log
+
+# clean rule for target.
+tests/CMakeFiles/parse_keyboard_log.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/parse_keyboard_log.dir/build.make tests/CMakeFiles/parse_keyboard_log.dir/clean
+.PHONY : tests/CMakeFiles/parse_keyboard_log.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/keyboard_capture_module.dir
+
+# All Build rule for target.
+tests/CMakeFiles/keyboard_capture_module.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_module.dir/build.make tests/CMakeFiles/keyboard_capture_module.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_module.dir/build.make tests/CMakeFiles/keyboard_capture_module.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=15,16 "Built target keyboard_capture_module"
+.PHONY : tests/CMakeFiles/keyboard_capture_module.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/keyboard_capture_module.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/keyboard_capture_module.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/keyboard_capture_module.dir/rule
+
+# Convenience name for target.
+keyboard_capture_module: tests/CMakeFiles/keyboard_capture_module.dir/rule
+.PHONY : keyboard_capture_module
+
+# clean rule for target.
+tests/CMakeFiles/keyboard_capture_module.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_module.dir/build.make tests/CMakeFiles/keyboard_capture_module.dir/clean
+.PHONY : tests/CMakeFiles/keyboard_capture_module.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/keyboard_capture_demo.dir
+
+# All Build rule for target.
+tests/CMakeFiles/keyboard_capture_demo.dir/all: tests/CMakeFiles/keyboard_capture_module.dir/all
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_demo.dir/build.make tests/CMakeFiles/keyboard_capture_demo.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_demo.dir/build.make tests/CMakeFiles/keyboard_capture_demo.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=13,14 "Built target keyboard_capture_demo"
+.PHONY : tests/CMakeFiles/keyboard_capture_demo.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/keyboard_capture_demo.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 4
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/keyboard_capture_demo.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/keyboard_capture_demo.dir/rule
+
+# Convenience name for target.
+keyboard_capture_demo: tests/CMakeFiles/keyboard_capture_demo.dir/rule
+.PHONY : keyboard_capture_demo
+
+# clean rule for target.
+tests/CMakeFiles/keyboard_capture_demo.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/keyboard_capture_demo.dir/build.make tests/CMakeFiles/keyboard_capture_demo.dir/clean
+.PHONY : tests/CMakeFiles/keyboard_capture_demo.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/analyze_keyboard_polling.dir
+
+# All Build rule for target.
+tests/CMakeFiles/analyze_keyboard_polling.dir/all:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/analyze_keyboard_polling.dir/build.make tests/CMakeFiles/analyze_keyboard_polling.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/analyze_keyboard_polling.dir/build.make tests/CMakeFiles/analyze_keyboard_polling.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=1,2 "Built target analyze_keyboard_polling"
+.PHONY : tests/CMakeFiles/analyze_keyboard_polling.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/analyze_keyboard_polling.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/analyze_keyboard_polling.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/analyze_keyboard_polling.dir/rule
+
+# Convenience name for target.
+analyze_keyboard_polling: tests/CMakeFiles/analyze_keyboard_polling.dir/rule
+.PHONY : analyze_keyboard_polling
+
+# clean rule for target.
+tests/CMakeFiles/analyze_keyboard_polling.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/analyze_keyboard_polling.dir/build.make tests/CMakeFiles/analyze_keyboard_polling.dir/clean
+.PHONY : tests/CMakeFiles/analyze_keyboard_polling.dir/clean
+
+#=============================================================================
 # Target rules for target _deps/googletest-build/googlemock/CMakeFiles/gmock.dir
 
 # All Build rule for target.
 _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/all: _deps/googletest-build/googletest/CMakeFiles/gtest.dir/all
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/build.make _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/depend
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/build.make _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=1,2 "Built target gmock"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=5,6 "Built target gmock"
 .PHONY : _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/all
 
 # Build rule for subdir invocation for target.
@@ -231,7 +483,7 @@ _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/all: _deps/googletes
 _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/all: _deps/googletest-build/googletest/CMakeFiles/gtest.dir/all
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/build.make _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/depend
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/build.make _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=3,4 "Built target gmock_main"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=7,8 "Built target gmock_main"
 .PHONY : _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/all
 
 # Build rule for subdir invocation for target.
@@ -257,7 +509,7 @@ _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/clean:
 _deps/googletest-build/googletest/CMakeFiles/gtest.dir/all:
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest.dir/depend
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=5,6 "Built target gtest"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=9,10 "Built target gtest"
 .PHONY : _deps/googletest-build/googletest/CMakeFiles/gtest.dir/all
 
 # Build rule for subdir invocation for target.
@@ -283,7 +535,7 @@ _deps/googletest-build/googletest/CMakeFiles/gtest.dir/clean:
 _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/all: _deps/googletest-build/googletest/CMakeFiles/gtest.dir/all
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/depend
 	$(MAKE) $(MAKESILENT) -f _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build.make _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=7,8 "Built target gtest_main"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles --progress-num=11,12 "Built target gtest_main"
 .PHONY : _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/all
 
 # Build rule for subdir invocation for target.

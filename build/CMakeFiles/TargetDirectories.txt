@@ -6,6 +6,15 @@
 /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/install/local.dir
 /home/iospore/Dev/Netnotes/NoteDaemon/build/CMakeFiles/install/strip.dir
 /home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/note-daemon-tests.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/live_keyboard_test.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/diagnose_keyboard.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/raw_stream_capture.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/proper_8byte_capture.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/keyboard_streaming_demo.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/parse_keyboard_log.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/keyboard_capture_module.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/keyboard_capture_demo.dir
+/home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/analyze_keyboard_polling.dir
 /home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/edit_cache.dir
 /home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/rebuild_cache.dir
 /home/iospore/Dev/Netnotes/NoteDaemon/build/tests/CMakeFiles/list_install_components.dir
