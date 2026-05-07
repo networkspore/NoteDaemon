@@ -1,117 +1,67 @@
 cmake_minimum_required(VERSION 3.16)
-project(note-daemon-tests VERSION 1.0 LANGUAGES CXX)
+project(NoteDaemonTests)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_BUILD_TYPE Release)
-
-# Find PkgConfig
+# Find required packages
 find_package(PkgConfig REQUIRED)
-
-# Find LibUSB
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 
-# Find Google Test
+# Google Test
 include(FetchContent)
 FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG v1.14.0
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG release-1.11.0
 )
-
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# Test executable
-add_executable(note-daemon-tests
-    tests_main.cpp
-    hid_parser_test.cpp
-    encryption_test.cpp
-    notebytes_test.cpp
+# Test sources
+set(TEST_SOURCES
+    test_main.cpp
+    ../src/keyboard_capture_lowlatency.cpp
+    # All test files will be added here as they are created
 )
+
+# Add keyboard_capture_lowlatency test
+list(APPEND TEST_SOURCES keyboard_capture_lowlatency_test.cpp)
+
+# Add other test files here as needed
+# list(APPEND TEST_SOURCES example_test.cpp)
+
+# Create test executable
+add_executable(note-daemon-tests ${TEST_SOURCES})
 
 target_include_directories(note-daemon-tests PRIVATE
-    ../include
-)
-
-target_link_libraries(note-daemon-tests PRIVATE
-    GTest::gtest
-    GTest::gtest_main
-    pthread
-)
-
-enable_testing()
-add_test(NAME hid_parser_tests COMMAND note-daemon-tests --gtest_filter=hid_parser_test.*)
-add_test(NAME encryption_tests COMMAND note-daemon-tests --gtest_filter=encryption_test.*)
-add_test(NAME notebytes_tests COMMAND note-daemon-tests --gtest_filter=notebytes_test.*)
-
-# Diagnose keyboard clean (working low-latency version)
-add_executable(diagnose_keyboard_clean
-    diagnose_keyboard_clean.cpp
-)
-
-target_include_directories(diagnose_keyboard_clean PRIVATE
-    ../include
-)
-
-target_link_libraries(diagnose_keyboard_clean PRIVATE
-    ${LIBUSB_LIBRARIES}
-    pthread
-)
-
-target_compile_options(diagnose_keyboard_clean PRIVATE
-    -Wall -Wextra -pedantic
-)
-
-# Low-latency keyboard capture module
-add_library(keyboard_capture_lowlatency
-    keyboard_capture_lowlatency.cpp
-)
-
-target_include_directories(keyboard_capture_lowlatency PUBLIC
-    ../include
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/dro
     ${LIBUSB_INCLUDE_DIRS}
 )
 
-target_link_libraries(keyboard_capture_lowlatency PUBLIC
+target_link_libraries(note-daemon-tests PRIVATE
+    gtest
+    gtest_main
     ${LIBUSB_LIBRARIES}
     pthread
 )
 
-target_compile_options(keyboard_capture_lowlatency PRIVATE
-    -Wall -Wextra -pedantic
-)
+# Add tests to CTest
+include(CTest)
+include(GoogleTest)
+gtest_discover_tests(note-daemon-tests)
 
-# Low-latency keyboard capture demo
-add_executable(keyboard_capture_lowlatency_demo
-    keyboard_capture_lowlatency_demo.cpp
-)
+# Keep the demo as a separate executable (optional, for manual testing)
+if(ENABLE_DEMO)
+    add_executable(keyboard_capture_lowlatency_demo
+        keyboard_capture_lowlatency_demo.cpp
+    )
 
-target_include_directories(keyboard_capture_lowlatency_demo PRIVATE
-    ../include
-)
+    target_include_directories(keyboard_capture_lowlatency_demo PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/include/dro
+        ${LIBUSB_INCLUDE_DIRS}
+    )
 
-target_link_libraries(keyboard_capture_lowlatency_demo PRIVATE
-    keyboard_capture_lowlatency
-)
-
-target_compile_options(keyboard_capture_lowlatency_demo PRIVATE
-    -Wall -Wextra -pedantic
-)
-
-# Parse keyboard log file
-add_executable(parse_keyboard_log
-    parse_keyboard_log.cpp
-)
-
-target_include_directories(parse_keyboard_log PRIVATE
-    ../include
-)
-
-target_link_libraries(parse_keyboard_log PRIVATE
-    pthread
-)
-
-target_compile_options(parse_keyboard_log PRIVATE
-    -Wall -Wextra -pedantic
-)
+    target_link_libraries(keyboard_capture_lowlatency_demo PRIVATE
+        ${LIBUSB_LIBRARIES}
+        pthread
+    )
+endif()

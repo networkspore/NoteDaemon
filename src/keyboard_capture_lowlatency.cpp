@@ -294,7 +294,7 @@ void KeyboardCaptureLowLatency::monitor_loop() {
 
 bool KeyboardCaptureLowLatency::reconnect() {
     // Must only run in capture thread (owns xfer_, handle, etc.)
-    
+
     // Cleanup current state
     if (xfer_) {
         libusb_cancel_transfer(xfer_);

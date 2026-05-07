@@ -568,16 +568,10 @@ private:
 
         auto device_state = it->second;
         if (!ensure_owner(device_state)) return;
-        
+
         // Decrement pending_events and notify streaming thread
         for (int i = 0; i < processed_count; ++i) {
             device_state->event_delivered();
-        }
-
-        // Wake the streaming thread if it was waiting
-        {
-            std::lock_guard<std::mutex> lk(device_state->queue_mutex);
-            device_state->queue_cv.notify_all();
         }
     }
     

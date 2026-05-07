@@ -292,17 +292,13 @@ namespace State {
                 return obj;
             }
         } hardware_info;
-        
+
         // Backpressure tracking
         std::atomic<int> pending_events{0};
         std::atomic<uint64_t> events_sent{0};
         std::atomic<uint64_t> events_dropped{0};
         uint64_t last_event_time = 0;
-        
-        // Queueing primitives
-        std::mutex queue_mutex;
-        std::condition_variable queue_cv;
-        
+
         DeviceState(const std::string& id, pid_t pid,
                 const std::string& dev_type, const cpp_int& avail_caps)
             : device_id(id), owner_pid(pid), 

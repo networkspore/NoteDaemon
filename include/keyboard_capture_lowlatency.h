@@ -53,7 +53,7 @@ public:
 
 private:
     static void LIBUSB_CALL transfer_callback(libusb_transfer* xfer);
-    
+
     void capture_loop();
     void process_loop();
     void monitor_loop();
@@ -62,19 +62,19 @@ private:
                               int& interface_num,
                               uint8_t& endpoint_in);
     bool reconnect();  // Runs ONLY in capture thread
-    
+
     Config cfg_;
     libusb_transfer* xfer_ = nullptr;
     std::vector<uint8_t> buffer_;
-    
+
     std::thread capture_thread_;
     std::thread process_thread_;
     std::thread monitor_thread_;
-    
+
     std::atomic<bool> running_{false};
     std::atomic<bool> device_lost_{false};
     std::atomic<bool> stop_requested_{false};
-    
+
     dro::SPSCQueue<KeyboardEvent> event_queue_{1024};
 };
 

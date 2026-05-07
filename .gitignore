@@ -86,7 +86,7 @@ build/
 *.vcxproj*
 *.filters
 *.cbp
-
+.openclaude-profile.json
 # =========================
 # OS junk
 # =========================
