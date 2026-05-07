@@ -24,6 +24,15 @@ set(TEST_SOURCES
 # Add keyboard_capture_lowlatency test
 list(APPEND TEST_SOURCES keyboard_capture_lowlatency_test.cpp)
 
+# Add hid_device_streaming_thread test
+list(APPEND TEST_SOURCES hid_device_streaming_thread_test.cpp)
+
+# Add device_session test
+list(APPEND TEST_SOURCES device_session_test.cpp)
+
+# Add error_handling test
+list(APPEND TEST_SOURCES error_handling_test.cpp)
+
 # Add other test files here as needed
 # list(APPEND TEST_SOURCES example_test.cpp)
 
@@ -41,6 +50,8 @@ target_link_libraries(note-daemon-tests PRIVATE
     gtest_main
     ${LIBUSB_LIBRARIES}
     pthread
+    ssl
+    crypto
 )
 
 # Add tests to CTest
