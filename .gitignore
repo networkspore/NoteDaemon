@@ -1,7 +1,7 @@
 # =========================
 # Build artifacts
 # =========================
-build/
+/build/
 bin/
 out/
 dist/

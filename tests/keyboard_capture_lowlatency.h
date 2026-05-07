@@ -1,97 +1,67 @@
 // keyboard_capture_lowlatency.h
-// Low-latency keyboard capture module.
-// Based on diagnose_keyboard_clean.cpp pattern that captures ALL events.
-// Uses lock-free queue to separate fast capture from slow processing.
+// Low-latency keyboard capture module (lock-free by thread layout)
 
 #ifndef KEYBOARD_CAPTURE_LOWLATENCY_H
-#define KEYBOARD_CAPTENCY_LOWLATENCY_H
+#define KEYBOARD_CAPTURE_LOWLATENCY_H
 
 #include <libusb-1.0/libusb.h>
 #include <functional>
-#include <memory>
 #include <vector>
 #include <atomic>
 #include <thread>
-#include <mutex>
-#include <queue>
+#include <cstring>
 
-// Simple lock-free single-producer, single-consumer queue
-// (In production, use a proper lock-free queue like moodycamel::ConcurrentQueue)
-template<typename T>
-class SPSCQueue {
-private:
-    static constexpr size_t QUEUE_SIZE = 1024;
-    T buffer_[QUEUE_SIZE];
-    std::atomic<size_t> write_pos_{0};
-    std::atomic<size_t> read_pos_{0};
-    
-public:
-    bool push(const T& item) {
-        size_t wp = write_pos_.load(std::memory_order_relaxed);
-        size_t rp = read_pos_.load(std::memory_order_acquire);
-        size_t next_wp = (wp + 1) % QUEUE_SIZE;
-        
-        if (next_wp == rp) {
-            return false; // Full
-        }
-        
-        buffer_[wp] = item;
-        write_pos_.store(next_wp, std::memory_order_release);
-        return true;
-    }
-    
-    bool pop(T& item) {
-        size_t rp = read_pos_.load(std::memory_order_relaxed);
-        size_t wp = write_pos_.load(std::memory_order_acquire);
-        
-        if (rp == wp) {
-            return false; // Empty
-        }
-        
-        item = buffer_[rp];
-        read_pos_.store((rp + 1) % QUEUE_SIZE, std::memory_order_release);
-        return true;
-    }
-    
-    bool empty() const {
-        return read_pos_.load(std::memory_order_acquire) == 
-               write_pos_.load(std::memory_order_acquire);
-    }
-};
+// High-performance SPSC queue (lock-free)
+#include "dro/spsc-queue.hpp"
 
 // Fixed-size keyboard event - NO HEAP ALLOCATION
 struct KeyboardEvent {
-    uint8_t data[8];  // Fixed 8-byte boot protocol report
-    uint8_t length;    // Actual length (≤ 8)
+    uint8_t data[8];
+    uint8_t length;
     uint64_t timestamp_ns;
+
+    KeyboardEvent() : length(0), timestamp_ns(0) {
+        memset(data, 0, sizeof(data));
+    }
 };
-
-
 
 class KeyboardCaptureLowLatency {
 public:
-    using EventCallback = std::function<void(const KeyboardEvent& event)>;
-    
+    using EventCallback      = std::function<void(const KeyboardEvent& event)>;
+    using DeviceLostCallback = std::function<void()>;
+    using DeviceFoundCallback = std::function<void()>;
+
     struct Config {
         libusb_context* libusb_ctx = nullptr;
         libusb_device_handle* handle = nullptr;
         int interface_num = -1;
         uint8_t endpoint_in = 0x81;
         std::string device_id;
+        uint16_t vendor_id = 0;
+        uint16_t product_id = 0;
         EventCallback on_event;
+        DeviceLostCallback on_device_lost;
+        DeviceFoundCallback on_device_found;
     };
-    
+
     explicit KeyboardCaptureLowLatency(const Config& cfg);
     ~KeyboardCaptureLowLatency();
-    
+
     void start();
     void stop();
     bool is_running() const;
-    
+
 private:
     static void LIBUSB_CALL transfer_callback(libusb_transfer* xfer);
+    
     void capture_loop();
     void process_loop();
+    void monitor_loop();
+    bool is_device_connected();
+    bool find_and_open_device(libusb_device_handle*& handle,
+                              int& interface_num,
+                              uint8_t& endpoint_in);
+    bool reconnect();  // Runs ONLY in capture thread
     
     Config cfg_;
     libusb_transfer* xfer_ = nullptr;
@@ -99,9 +69,13 @@ private:
     
     std::thread capture_thread_;
     std::thread process_thread_;
-    std::atomic<bool> running_{false};
+    std::thread monitor_thread_;
     
-    SPSCQueue<KeyboardEvent> event_queue_;
+    std::atomic<bool> running_{false};
+    std::atomic<bool> device_lost_{false};
+    std::atomic<bool> stop_requested_{false};
+    
+    dro::SPSCQueue<KeyboardEvent> event_queue_{1024};
 };
 
 #endif // KEYBOARD_CAPTURE_LOWLATENCY_H
