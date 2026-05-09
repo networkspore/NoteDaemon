@@ -154,16 +154,24 @@ main() {
     echo ""
     
     # Step 4: Install binary
-    if prompt_yes_no "Install note-daemon binary to /usr/local/bin?" "Y"; then
-        print_status "Installing note-daemon binary..."
+    if prompt_yes_no "Install note-daemon and process-monitor binaries to /usr/local/bin?" "Y"; then
+        print_status "Installing binaries..."
         
         if [[ ! -f "build/note-daemon" ]]; then
-            print_error "Binary not found at build/note-daemon"
+            print_error "note-daemon binary not found at build/note-daemon"
+            exit 1
+        fi
+        
+        if [[ ! -f "build/process-monitor/process-monitor" ]]; then
+            print_error "process-monitor binary not found at build/process-monitor/process-monitor"
             exit 1
         fi
         
         install -m 0755 -o root -g netnotes build/note-daemon /usr/local/bin/note-daemon
-        print_success "Binary installed to /usr/local/bin/note-daemon"
+        install -m 0755 -o root -g netnotes build/process-monitor/process-monitor /usr/local/bin/process-monitor
+        print_success "Binaries installed to /usr/local/bin/"
+        echo "    - note-daemon"
+        echo "    - process-monitor"
     else
         print_warning "Skipping binary installation"
     fi
@@ -302,6 +310,11 @@ main() {
         echo ""
         print_status "HID device permissions:"
         ls -l /dev/hidraw* 2>/dev/null || echo "  No HID devices found"
+        
+        echo ""
+        print_status "Runtime directory permissions:"
+        ls -ld /run/netnotes/ 2>/dev/null || echo "  /run/netnotes/ not found"
+        ls -l /run/netnotes/ 2>/dev/null || true
     fi
     
     # Final summary
@@ -311,11 +324,13 @@ main() {
     echo "============================================"
     echo ""
     echo "Installation Summary:"
-    echo "  • Binary:         /usr/local/bin/note-daemon"
+    echo "  • Binaries:       /usr/local/bin/note-daemon"
+    echo "                   /usr/local/bin/process-monitor"
     echo "  • Service:        note-daemon.service"
     echo "  • Udev Rules:     /etc/udev/rules.d/99-netnotes.rules"
     echo "  • User/Group:     netnotes:netnotes"
     echo "  • Data Directory: /var/lib/netnotes"
+    echo "  • Runtime Dir:    /run/netnotes (registry file)"
     echo ""
     
     if systemctl list-unit-files note-daemon.service >/dev/null 2>&1; then

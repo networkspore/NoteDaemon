@@ -11,6 +11,9 @@
 #include <thread>
 #include <cstring>
 
+// HID constants — shared header replaces magic numbers throughout the codebase
+#include "hid_constants.h"
+
 // High-performance SPSC queue (lock-free)
 #include "dro/spsc-queue.hpp"
 
@@ -35,7 +38,7 @@ public:
         libusb_context* libusb_ctx = nullptr;
         libusb_device_handle* handle = nullptr;
         int interface_num = -1;
-        uint8_t endpoint_in = 0x81;
+        uint8_t endpoint_in = HidConstants::kDefaultEndpointIn;
         std::string device_id;
         uint16_t vendor_id = 0;
         uint16_t product_id = 0;
@@ -75,7 +78,7 @@ private:
     std::atomic<bool> device_lost_{false};
     std::atomic<bool> stop_requested_{false};
 
-    dro::SPSCQueue<KeyboardEvent> event_queue_{1024};
+    dro::SPSCQueue<KeyboardEvent> event_queue_{HidConstants::kSpscQueueCapacity};
 };
 
 #endif // KEYBOARD_CAPTURE_LOWLATENCY_H

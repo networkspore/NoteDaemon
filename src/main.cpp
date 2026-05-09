@@ -9,6 +9,7 @@
 #include <sys/syslog.h>
 #include <sys/un.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #include <unistd.h>
 #include <syslog.h>
@@ -29,8 +30,8 @@
 std::atomic<bool> g_running{true};
 
 void signal_handler(int signum) {
-    syslog(LOG_INFO, "Received signal %d, shutting down gracefully", signum);
-    g_running = false;
+    (void)signum;  // Suppress unused parameter warning
+    g_running = false;  // Atomic flag only — nothing else
 }
 
 /**
@@ -76,7 +77,7 @@ public:
     }
 
      static bool can_access_any_usb_device() {
-        libusb_device **devs = nullptr;
+        libusb_device** list = nullptr;
         libusb_context* ctx = nullptr;
         int rc = libusb_init(&ctx);
         if (rc < 0) {
@@ -84,18 +85,15 @@ public:
             return false;
         }
 
-        ssize_t count = libusb_get_device_list(ctx, devs ? &devs : nullptr);
-        
-        if (count < 0) {
-            syslog(LOG_INFO, "[ERROR] %s: %zd", "LIBUSB list",  count);
+        ssize_t cnt = libusb_get_device_list(ctx, &list);
+        if (cnt < 0) {
+            syslog(LOG_INFO, "[ERROR] %s: %zd", "LIBUSB list", cnt);
             libusb_exit(ctx);
             return false;
         }
 
         bool accessible = false;
 
-        libusb_device** list = nullptr;
-        ssize_t cnt = libusb_get_device_list(ctx, &list);
         for (ssize_t i = 0; i < cnt; i++) {
             libusb_device* dev = list[i];
             libusb_device_handle* handle = nullptr;
@@ -610,6 +608,13 @@ private:
 
 public:
     int run() {
+        // RAII guard to ensure cleanup() is called when run() returns
+        struct CleanupGuard {
+            NoteDaemon* daemon;
+            CleanupGuard(NoteDaemon* d) : daemon(d) {}
+            ~CleanupGuard() { daemon->cleanup(); }
+        } guard(this);
+        
         signal(SIGTERM, signal_handler);
         signal(SIGINT, signal_handler);
 
@@ -654,6 +659,29 @@ public:
         }
 
         syslog(LOG_INFO, "Daemon ready on %s", config.socket_path.c_str());
+
+        // Fork a monitor process that will clean up orphaned devices if we crash.
+        // The monitor runs in its own session (setsid) so it survives if the
+        // parent's process group is killed. It watches our PID and reattaches
+        // kernel drivers on our termination.
+        pid_t monitor_pid = fork();
+        if (monitor_pid < 0) {
+            syslog(LOG_WARNING, "Failed to fork process monitor: %s",
+                   strerror(errno));
+        } else if (monitor_pid == 0) {
+            // Child — exec the monitor process
+            char pid_str[32];
+            snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+            execl("/usr/local/bin/process_monitor", "process_monitor", pid_str,
+                  nullptr);
+            // If execl fails, fall through to normal exit
+            syslog(LOG_ERR, "Failed to exec process_monitor: %s",
+                   strerror(errno));
+            _exit(1);
+        } else {
+            // Parent — continue normal execution
+            syslog(LOG_INFO, "Process monitor started (PID %d)", monitor_pid);
+        }
 
         // Main event loop
         while (g_running) {
@@ -821,6 +849,10 @@ private:
     }
 
     void cleanup() {
+        // Shutdown all sessions first - release devices and reattach kernel drivers
+        // This needs the USB context to be valid
+        DeviceSession::shutdown_all_sessions();
+        
         if (server_socket >= 0) {
             safe_close(server_socket);
             unlink(config.socket_path.c_str());
@@ -828,6 +860,7 @@ private:
         
         if (usb_ctx) {
             libusb_exit(usb_ctx);
+            usb_ctx = nullptr;  // Mark as cleaned up
         }
     }
 };

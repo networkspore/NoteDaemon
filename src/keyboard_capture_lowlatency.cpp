@@ -9,7 +9,7 @@
 KeyboardCaptureLowLatency::KeyboardCaptureLowLatency(const Config& cfg)
     : cfg_(cfg)
 {
-    buffer_.resize(8, 0); // 8-byte boot protocol
+    buffer_.resize(HidConstants::kHidReportSize, 0); // 8-byte boot protocol
 }
 
 KeyboardCaptureLowLatency::~KeyboardCaptureLowLatency() {
@@ -29,7 +29,7 @@ bool KeyboardCaptureLowLatency::find_and_open_device(libusb_device_handle*& hand
 
     libusb_device* keyboard = nullptr;
     interface_num = -1;
-    endpoint_in = 0x81;
+    endpoint_in = HidConstants::kDefaultEndpointIn;
 
     for (ssize_t i = 0; i < count; i++) {
         libusb_device_descriptor desc;
@@ -237,7 +237,7 @@ void LIBUSB_CALL KeyboardCaptureLowLatency::transfer_callback(libusb_transfer* x
 
 void KeyboardCaptureLowLatency::capture_loop() {
     while (running_.load(std::memory_order_relaxed)) {
-        struct timeval tv = {0, 1000}; // 1ms timeout to avoid busy-wait
+        struct timeval tv = {0, HidConstants::kLibusbPollTimeoutUs}; // 1ms timeout to avoid busy-wait
         libusb_handle_events_timeout_completed(cfg_.libusb_ctx, &tv, nullptr);
 
         // Handle reconnection if device was lost
@@ -311,7 +311,7 @@ bool KeyboardCaptureLowLatency::reconnect() {
         cfg_.handle = nullptr;
     }
     cfg_.interface_num = -1;
-    cfg_.endpoint_in = 0x81;
+    cfg_.endpoint_in = HidConstants::kDefaultEndpointIn;
 
     // Find and open new device
     libusb_device_handle* new_handle = nullptr;

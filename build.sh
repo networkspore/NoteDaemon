@@ -51,6 +51,10 @@ cmake -DCMAKE_BUILD_TYPE="$BUILD_TYPE" ..
 echo "[*] Building $PROJECT ($BUILD_TYPE)..."
 make -j"$JOBS"
 
+echo "[*] Build complete!"
+echo "    - note-daemon:    $BUILD_DIR/note-daemon"
+echo "    - process-monitor: $BUILD_DIR/process-monitor/process-monitor"
+
 # === INSTALL ===
 if $INSTALL; then
     echo "[*] Installing $SERVICE_NAME system-wide (requires sudo)..."
@@ -68,4 +72,5 @@ if $INSTALL; then
     fi
 fi
 
-echo "[✓] Build complete! Binary located at: $BUILD_DIR/notedaemon"
+echo "[✓] Build complete! Binary located at: $BUILD_DIR/note-daemon"
+echo "[✓] process-monitor located at: $BUILD_DIR/process-monitor/process-monitor"

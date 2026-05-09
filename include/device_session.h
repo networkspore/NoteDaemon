@@ -38,6 +38,7 @@ using namespace Capabilities;
 #include "usb_device_descriptor.h"
 #include "device_streaming_thread.h"
 #include "hid_device_streaming_thread.h"
+#include "device_registry.h"
 
 /**
  * Device Session - manages protocol and routing
@@ -70,6 +71,21 @@ private:
     std::unordered_map<NoteBytes::Value, Handler> routed_handlers_;
     std::unordered_map<NoteBytes::Value, Handler> routed_cmd_handlers_;
     
+    // ===== CRASH-RECOVERY DEVICE REGISTRY =====
+    /**
+     * Register a claimed device in the crash-recovery registry.
+     * Called when a device is successfully claimed.
+     */
+    void register_claimed_device(const std::string& device_id,
+                                 int interface_number,
+                                 bool kernel_driver_attached);
+    
+    /**
+     * Remove a device from the registry on clean release.
+     * Called when a device is released normally.
+     */
+    void unregister_device(const std::string& device_id);
+    
     // ===== STATIC SESSION REGISTRY (for broadcasting) =====
     static std::mutex& sessions_mutex();
     static std::vector<DeviceSession*>& active_sessions();
@@ -95,10 +111,16 @@ private:
     
 public:
     /**
-     * Broadcast a message to all active sessions
-     * Used for DEVICE_ATTACHED/DETACHED hotplug notifications
+     * Shutdown all active sessions - release devices and reattach kernel drivers.
+     * Called on daemon shutdown to ensure cleanup.
      */
-    static void broadcast_to_all_sessions(const NoteBytes::Object& msg) {
+    static void shutdown_all_sessions();
+    
+/**
+ * Broadcast a message to all active sessions
+ * Used for DEVICE_ATTACHED/DETACHED hotplug notifications
+ */
+static void broadcast_to_all_sessions(const NoteBytes::Object& msg) {
         std::lock_guard<std::mutex> lock(sessions_mutex());
         
         for (DeviceSession* session : active_sessions()) {
@@ -499,6 +521,8 @@ private:
                 libusb_close(device_desc->handle);
                 device_desc->handle = nullptr;
             }
+            // Remove from the crash-recovery registry — device is physically gone.
+            this->unregister_device(device_id);
             // Keep the descriptor entry — it will be reusable after reattach.
         }
 
@@ -776,6 +800,8 @@ private:
                 libusb_close(device->handle);
                 device->handle = nullptr;
             }
+            // Clean up registry entries for all devices in this session
+            this->unregister_device(id);
         }
         
         syslog(LOG_INFO, "Released all devices");
@@ -963,6 +989,11 @@ private:
             device_desc, device_state, client_fd);
         streaming_thread->start();
 
+        // Register device in the crash-recovery registry
+        this->register_claimed_device(device_id,
+                                      device_desc->interface_number,
+                                      device_desc->kernel_driver_attached);
+
         // Store in maps
         device_states[device_id] = device_state;
         streaming_threads[device_id] = std::move(streaming_thread);
@@ -1044,6 +1075,9 @@ private:
                 device_desc->kernel_driver_attached = false;
             }
         }
+
+        // Remove from the crash-recovery registry
+        this->unregister_device(device_id);
 
         // Clear encryption
         device_encryptions_.erase(device_id);

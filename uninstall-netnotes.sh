@@ -17,6 +17,12 @@ udevadm trigger
 # Remove runtime/data directories
 rm -rf /var/lib/netnotes /run/netnotes /var/run/netnotes
 
+# Remove binaries
+rm -f /usr/local/bin/note-daemon
+rm -f /usr/local/bin/process-monitor
+
+echo "Removed binaries from /usr/local/bin/"
+
 
 # Remove netnotes user
 if id netnotes >/dev/null 2>&1; then

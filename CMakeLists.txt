@@ -11,7 +11,7 @@ find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED)
 
 # Source files
-file(GLOB_RECURSE SOURCES src/*.cpp)
+file(GLOB SOURCES src/*.cpp)
 
 # Executable
 add_executable(note-daemon ${SOURCES})
@@ -19,6 +19,7 @@ add_executable(note-daemon ${SOURCES})
 # Include directories
 target_include_directories(note-daemon PRIVATE
     include
+    src
     ${LIBUSB_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
 )
@@ -56,3 +57,6 @@ message(STATUS "OpenSSL Version: ${OPENSSL_VERSION}")
 
 # Add tests subdirectory
 add_subdirectory(tests)
+
+# Add process-monitor subdirectory
+add_subdirectory(process-monitor)

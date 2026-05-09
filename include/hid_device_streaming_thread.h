@@ -16,6 +16,9 @@
 #include <syslog.h>
 #include <deque>
 
+// HID constants — shared header replaces magic numbers throughout the codebase
+#include "hid_constants.h"
+
 // Lock-free event type for passing HID reports between capture and process threads
 struct HIDReportEvent {
     std::vector<uint8_t> data;
@@ -51,11 +54,11 @@ private:
     std::thread process_thread_;
 
     // Lock-free queue for passing events (SPSC: capture -> process)
-    dro::SPSCQueue<HIDReportEvent> spsc_queue_{1024};
+    dro::SPSCQueue<HIDReportEvent> spsc_queue_{HidConstants::kSpscQueueCapacity};
 
     // Event queue for sending to client (backpressure handling, single-threaded)
     std::deque<std::vector<uint8_t>> client_queue_;
-    static constexpr size_t MAX_QUEUE_SIZE = 1000;
+    static constexpr size_t MAX_QUEUE_SIZE = HidConstants::kMaxClientEventQueue;
 
 public:
     HIDDeviceStreamingThread(std::shared_ptr<USBDeviceDescriptor> device,
@@ -95,16 +98,13 @@ public:
             return;
         }
 
-        // Get endpoint from device - use a default if not stored in device
-        uint8_t endpoint_in = 0x81; // Default interrupt IN endpoint
-
         // Fill interrupt transfer
         libusb_fill_interrupt_transfer(
             xfer_,
             device_->handle,
-            endpoint_in,
+            HidConstants::kDefaultEndpointIn,
             buffer,
-            64,
+            HidConstants::kHidReportBufferSize,
             &HIDDeviceStreamingThread::transfer_callback,
             this,
             0  // no timeout - handled by event loop
@@ -140,13 +140,14 @@ public:
             libusb_cancel_transfer(xfer_);
         }
 
-        // Join threads
+        // Join threads — capture_loop will free the buffer, process_loop will drain
         if (capture_thread_.joinable()) capture_thread_.join();
         if (process_thread_.joinable()) process_thread_.join();
 
-        // Cleanup transfer
+        // Now safe to free the transfer structure.
+        // Note: capture_loop already freed xfer_->buffer (delete[]), so we only
+        // free the transfer structure itself, not the buffer.
         if (xfer_) {
-            // Buffer is freed by libusb after transfer completes or is cancelled
             libusb_free_transfer(xfer_);
             xfer_ = nullptr;
         }
@@ -162,6 +163,13 @@ private:
     static void LIBUSB_CALL transfer_callback(libusb_transfer* xfer) {
         auto* self = static_cast<HIDDeviceStreamingThread*>(xfer->user_data);
 
+        // Guard: if running_ is false, the object may be in destruction.
+        // Callbacks can fire after libusb_cancel_transfer returns but before
+        // the transfer is freed, so we must not access any members after this point.
+        if (!self->running_.load(std::memory_order_relaxed)) {
+            return;
+        }
+
         if (xfer->status == LIBUSB_TRANSFER_COMPLETED && xfer->actual_length > 0) {
             // Push event to queue (lock-free, drop if full to maintain low latency)
             HIDReportEvent event(xfer->buffer, xfer->actual_length);
@@ -175,15 +183,14 @@ private:
         } else if (xfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
             // Device disconnected - notify via queue
             self->notify_device_lost();
-        }
-
-        // Resubmit if still running
-        if (self->running_.load(std::memory_order_relaxed) &&
-            xfer->status != LIBUSB_TRANSFER_NO_DEVICE) {
-            int rc = libusb_submit_transfer(xfer);
-            if (rc != LIBUSB_SUCCESS) {
-                syslog(LOG_ERR, "Failed to resubmit transfer: %s", libusb_error_name(rc));
-                self->running_.store(false, std::memory_order_release);
+        } else {
+            // Resubmit if still running and not in a terminal state
+            if (self->running_.load(std::memory_order_relaxed)) {
+                int rc = libusb_submit_transfer(xfer);
+                if (rc != LIBUSB_SUCCESS) {
+                    syslog(LOG_ERR, "Failed to resubmit transfer: %s", libusb_error_name(rc));
+                    self->running_.store(false, std::memory_order_release);
+                }
             }
         }
     }
@@ -193,7 +200,7 @@ private:
         // Use the device's libusb context if available, otherwise nullptr (default context)
         libusb_context* ctx = device_ ? nullptr : nullptr; // extend if ctx stored in device_
 
-        struct timeval tv = {0, 1000}; // 1ms timeout to avoid busy-wait
+        struct timeval tv = {0, HidConstants::kLibusbPollTimeoutUs}; // 1ms timeout to avoid busy-wait
 
         while (running_.load(std::memory_order_relaxed)) {
             libusb_handle_events_timeout_completed(ctx, &tv, nullptr);
@@ -272,9 +279,11 @@ private:
     }
 
     void notify_device_lost() {
-        // This is called from the callback context - just stop and let
-        // the device session handle reconnection
-        running_.store(false, std::memory_order_release);
+        // Guard: use exchange to prevent double-notification if stop() also
+        // sets running_ to false. This ensures we don't push a sentinel on a
+        // destroyed object.
+        if (!running_.exchange(false, std::memory_order_release)) return;
+
         // Signal the process thread to exit
         (void)spsc_queue_.try_push(HIDReportEvent::sentinel());
 
