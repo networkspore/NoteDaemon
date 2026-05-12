@@ -18,6 +18,9 @@ FetchContent_MakeAvailable(googletest)
 set(TEST_SOURCES
     test_main.cpp
     ../src/keyboard_capture_lowlatency.cpp
+    # Core framework sources needed for tests
+    ../src/core/module_registry.cpp
+    ../src/core/module_loader.cpp
     # All test files will be added here as they are created
 )
 
@@ -33,6 +36,9 @@ list(APPEND TEST_SOURCES device_session_test.cpp)
 # Add error_handling test
 list(APPEND TEST_SOURCES error_handling_test.cpp)
 
+# Add device_claim_release test (device claiming and releasing workflow)
+list(APPEND TEST_SOURCES device_claim_release_test.cpp)
+
 # Add other test files here as needed
 # list(APPEND TEST_SOURCES example_test.cpp)
 
@@ -42,6 +48,8 @@ add_executable(note-daemon-tests ${TEST_SOURCES})
 target_include_directories(note-daemon-tests PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/dro
+    ${CMAKE_SOURCE_DIR}/include/module_framework
+    ${CMAKE_SOURCE_DIR}/src
     ${LIBUSB_INCLUDE_DIRS}
 )
 

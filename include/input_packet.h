@@ -21,10 +21,11 @@ namespace InputPacket {
  */
 struct RoutedMessage {
     bool is_routed;
-    NoteBytes::Value device_id;
+    NoteBytes::Value module_id;      // NEW: module_id for routing
+    NoteBytes::Value device_id;      // NEW: device_id for device-level routing
     NoteBytes::Value message;
 
-    RoutedMessage() : is_routed(false), device_id(0) {}
+    RoutedMessage() : is_routed(false), module_id(0), device_id(0) {}
 
     inline bool isEncrypted() const { 
         return message.type() == NoteBytes::Type::ENCRYPTED; 
@@ -197,14 +198,14 @@ public:
     // ===== Protocol Control Messages =====
     
     std::vector<uint8_t> create_disconnected() {
-        return create(EventBytes::TYPE_DISCONNECTED);
+        return create(NoteMessaging::ProtocolMessages::DISCONNECTED);
     }
     
     std::vector<uint8_t> create_error(int error_code, const std::string& message) {
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
-        packet.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
-        packet.add(NoteMessaging::Keys::ERROR_CODE, error_code);
+        packet.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::ERROR);
+        packet.add(NoteMessaging::Keys::ERROR, error_code);
         packet.add(NoteMessaging::Keys::MSG, message);
         
         return packet.serialize_with_header();
@@ -213,7 +214,7 @@ public:
     std::vector<uint8_t> create_accept(const std::string& status = "ok") {
         NoteBytes::Object packet;
         packet.add(NoteMessaging::Keys::DEVICE_ID, device_id_);
-        packet.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
+        packet.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::ACCEPT);
         packet.add(NoteMessaging::Keys::STATUS, status);
         
         return packet.serialize_with_header();
@@ -243,10 +244,21 @@ inline RoutedMessage receive_message(int client_fd) {
     NoteBytes::Value firstValue = reader.read_value();
     
     if (firstValue.type() == NoteBytes::Type::STRING) {
-        // Routed message: [STRING:deviceId][OBJECT/ENCRYPTED:payload]
+        // Routed message: [STRING:moduleId][STRING:deviceId][OBJECT/ENCRYPTED:payload]
         result.is_routed = true;
-        result.device_id = firstValue;
-        result.message = reader.read_value();
+        result.module_id = firstValue;
+        
+        // Read device_id if present
+        NoteBytes::Value secondValue = reader.read_value();
+        if (secondValue.type() == NoteBytes::Type::STRING) {
+            result.device_id = secondValue;
+            result.message = reader.read_value();
+        } else {
+            // Legacy format: [STRING:deviceId][OBJECT/ENCRYPTED:payload]
+            result.device_id = result.module_id;
+            result.module_id = NoteBytes::Value(0);
+            result.message = secondValue;
+        }
         
         if (!result.isValid()) {
             throw std::runtime_error("Invalid message type after deviceId: " + 
@@ -256,6 +268,7 @@ inline RoutedMessage receive_message(int client_fd) {
     } else if (firstValue.type() == NoteBytes::Type::OBJECT) {
         // Non-routed control message: [OBJECT:message]
         result.is_routed = false;
+        result.module_id = NoteBytes::Value(0);
         result.device_id = NoteBytes::Value(0);
         result.message = firstValue;
         

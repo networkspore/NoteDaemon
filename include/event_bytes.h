@@ -41,30 +41,7 @@ inline const NoteBytes::Value EVENT_FRAMEBUFFER_RESIZE("container_resize");
 // ===== SPECIAL INPUT =====
 inline const NoteBytes::Value EVENT_RAW_HID("raw_hid");
 
-// ===== ENCRYPTION / PROTOCOL =====
-inline const NoteBytes::Value TYPE_ENCRYPTION_OFFER("encryption_offer");
-inline const NoteBytes::Value TYPE_ENCRYPTION_ACCEPT("encryption_accept");
-inline const NoteBytes::Value TYPE_ENCRYPTION_READY("encryption_ready");
-inline const NoteBytes::Value TYPE_ENCRYPTED("encrypted");
-inline const NoteBytes::Value TYPE_ENCRYPTION_DECLINE("encryption_decline");
 
-// ===== STATE CHANGE EVENTS =====
-inline const NoteBytes::Value EVENT_RELEASE("release");
-inline const NoteBytes::Value EVENT_REMOVED("removed");
-inline const NoteBytes::Value EVENT_CHANGED("changed");
-inline const NoteBytes::Value EVENT_CHECKED("checked");
-inline const NoteBytes::Value EVENT_UPDATED("updated");
-inline const NoteBytes::Value EVENT_ADDED("added");
-
-// ===== PROTOCOL CONTROL =====
-inline const NoteBytes::Value TYPE_ERROR("error");
-inline const NoteBytes::Value TYPE_DISCONNECTED("disconnected");
-inline const NoteBytes::Value TYPE_PONG("pong");
-inline const NoteBytes::Value TYPE_PING("ping");
-inline const NoteBytes::Value TYPE_ACCEPT("accept");
-inline const NoteBytes::Value TYPE_HELLO("hello");
-inline const NoteBytes::Value TYPE_CMD("cmd");
-inline const NoteBytes::Value TYPE_SHUTDOWN("shutdown");
 
 
 /**

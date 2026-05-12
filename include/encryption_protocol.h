@@ -8,7 +8,6 @@
 #include "encryption.h"
 #include "note_messaging.h"
 #include "notebytes.h"
-#include "event_bytes.h"
 #include <memory>
 #include <syslog.h>
 #include <vector>
@@ -250,7 +249,7 @@ public:
         const std::string& cipher = "aes-256-gcm"
     ) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::CONTROL, EventBytes::TYPE_ENCRYPTION_OFFER);
+        msg.add(NoteMessaging::Keys::CONTROL, NoteMessaging::ProtocolMessages::ENCRYPTION_OFFER);
         msg.add(NoteMessaging::Keys::CIPHER, cipher);
         msg.add(NoteMessaging::Keys::PUBLIC_KEY, 
                NoteBytes::Value(server_public_key.data(), 
@@ -288,7 +287,7 @@ public:
         const std::vector<uint8_t>& iv
     ) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::CONTROL, EventBytes::TYPE_ENCRYPTION_READY);
+        msg.add(NoteMessaging::Keys::CONTROL, NoteMessaging::ProtocolMessages::ENCRYPTION_READY);
         msg.add(NoteMessaging::Keys::IV, 
                NoteBytes::Value(iv.data(), iv.size(), NoteBytes::Type::RAW_BYTES));
         msg.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::ACTIVE);
@@ -301,7 +300,7 @@ public:
      */
     static NoteBytes::Object build_encryption_decline(const std::string& reason) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ENCRYPTION_DECLINE);
+        msg.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::ENCRYPTION_DECLINE);
         msg.add(NoteMessaging::Keys::MSG, reason);
         
         return msg;
@@ -312,8 +311,8 @@ public:
      */
     static NoteBytes::Object build_encryption_error(const std::string& reason) {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::CONTROL, EventBytes::TYPE_ERROR);
-        msg.add(NoteMessaging::Keys::ERROR_CODE, 
+        msg.add(NoteMessaging::Keys::CONTROL, NoteMessaging::ProtocolMessages::ERROR);
+        msg.add(NoteMessaging::Keys::ERROR, 
                NoteMessaging::ErrorCodes::ENCRYPTION_FAILED);
         msg.add(NoteMessaging::Keys::MSG, reason);
         

@@ -1,5 +1,5 @@
 // notedaemon/main.cpp
-// IO Daemon with realistic config and Linux requirement validation
+// Refactored to use modular architecture
 
 #include <grp.h>
 #include <errno.h>  
@@ -20,709 +20,232 @@
 #include <string>
 #include <map>
 #include <vector>
-#include "../include/utils.h"
-#include "../include/device_session.h"
+#include <optional>
 
+#include "utils.h"
+#include "device_session.h"
+#include "note_messaging.h"
+#include "event_bytes.h"
+#include "async_logger.h"
 
+// Module framework includes
+#include "module_framework/error.h"
+#include "module_framework/imodule.h"
+#include "module_framework/module_loader.h"
+#include "module_framework/module_registry.h"
+#include "module_framework/handler_registry.h"
+#include "module_framework/config_manager.h"
+#include "module_framework/error_collector.h"
 
+using namespace NoteDaemon;
+using Json = nlohmann::json;
+
+// Core API version - modules check this for compatibility
+constexpr std::string_view CORE_API_VERSION = "1.0.0";
 
 // Global state for signal handling
 std::atomic<bool> g_running{true};
 
 void signal_handler(int signum) {
-    (void)signum;  // Suppress unused parameter warning
-    g_running = false;  // Atomic flag only — nothing else
+    AsyncLogger::Logger::log_info("[Signal Handler] Signal " + std::to_string(signum) + " received, setting g_running=false", "NoteDaemon");
+    (void)signum;
+    g_running = false;
+    AsyncLogger::Logger::log_info("[Signal Handler] g_running set to false", "NoteDaemon");
 }
 
+// Forward declarations from existing code
+class LinuxRequirements;
+class DaemonConfig;
+
 /**
- * Linux requirements checker
+ * Simplified main for modular architecture
+ * Loads modules and routes messages through them
  */
-class LinuxRequirements {
-public:
-    struct CheckResult {
-        bool passed;
-        std::string message;
-        std::string fix_suggestion;
-    };
-    
-
-    static void log_privileges() {
-     
-        // 1. Root always OK
-        if (getuid() == 0) {
-            syslog(LOG_INFO, "[Warning] %s: %s", "Root", 
-                "Access with root user, is a security risk."
-                "\nSee README.md for secure setup");
-        }else{
-
-            // 2. CAP_SYS_ADMIN can also access USB
-            #ifdef _LINUX_CAPABILITY_VERSION_3
-            cap_t caps = cap_get_proc();
-            if (caps) {
-                cap_flag_value_t cap_value;
-                if (cap_get_flag(caps, CAP_SYS_ADMIN, CAP_EFFECTIVE, &cap_value) == 0) {
-                    if (cap_value == CAP_SET) {
-                        cap_free(caps);
-                        syslog(LOG_INFO, "[Warning] %s: %s", "CAP_SYS_ADMIN", 
-                            "Access with CAP_SYS_ADMIN, is a security risk."
-                            "\nSee README.md for secure setup");
-                    }
-                }
-                cap_free(caps);
-            }
-            #endif
-        }
-      
-  
-    }
-
-     static bool can_access_any_usb_device() {
-        libusb_device** list = nullptr;
-        libusb_context* ctx = nullptr;
-        int rc = libusb_init(&ctx);
-        if (rc < 0) {
-            syslog(LOG_ERR, "[ERROR] %s: %s", "LIBUSB Context", libusb_error_name(rc));
-            return false;
-        }
-
-        ssize_t cnt = libusb_get_device_list(ctx, &list);
-        if (cnt < 0) {
-            syslog(LOG_INFO, "[ERROR] %s: %zd", "LIBUSB list", cnt);
-            libusb_exit(ctx);
-            return false;
-        }
-
-        bool accessible = false;
-
-        for (ssize_t i = 0; i < cnt; i++) {
-            libusb_device* dev = list[i];
-            libusb_device_handle* handle = nullptr;
-            rc = libusb_open(dev, &handle);
-            if (rc != 0) {
-                // Skip devices that cannot be opened (likely root hubs)
-                continue;
-            }
-            accessible = true;
-            // process accessible device
-            libusb_close(handle);
-        }
-        libusb_free_device_list(list, 1);
-
-        libusb_exit(ctx);
-
-        return accessible;
-    }
-
-
-    static bool can_access_usb_device(uint16_t vendor, uint16_t product) {
-        libusb_device **devs;
-        libusb_context *ctx = nullptr;
-
-        if (libusb_init(&ctx) != 0) return false;
-
-        ssize_t count = libusb_get_device_list(ctx, &devs);
-        if (count < 0) {
-            libusb_exit(ctx);
-            return false;
-        }
-
-        bool accessible = false;
-
-        for (ssize_t i = 0; i < count; i++) {
-            libusb_device *d = devs[i];
-            libusb_device_descriptor desc;
-
-            if (libusb_get_device_descriptor(d, &desc) == 0 &&
-                desc.idVendor == vendor &&
-                desc.idProduct == product)
-            {
-                libusb_device_handle* handle = nullptr;
-                int r = libusb_open(d, &handle);
-
-                if (r == 0) {
-                    accessible = true;
-                    libusb_close(handle);
-                    break;
-                }
-            }
-        }
-
-        libusb_free_device_list(devs, 1);
-        libusb_exit(ctx);
-        return accessible;
-    }
-    
-    /**
-     * Check if socket group exists
-     */
-    static CheckResult check_socket_group(const std::string& group_name) {
-        CheckResult result;
-        
-        struct group* grp = getgrnam(group_name.c_str());
-        if (grp) {
-            result.passed = true;
-            result.message = "Group '" + group_name + "' exists (gid=" + 
-                           std::to_string(grp->gr_gid) + ")";
-            return result;
-        }
-        
-        result.passed = false;
-        result.message = "Group '" + group_name + "' does not exist";
-        result.fix_suggestion = 
-            "Create group: sudo groupadd " + group_name + "\n"
-            "Add users: sudo usermod -aG " + group_name + " USERNAME";
-        
-        return result;
-    }
-    
-    /**
-     * Check if socket directory is writable
-     */
-    static CheckResult check_socket_directory(const std::string& dir_path) {
-        CheckResult result;
-        
-        // Try to create directory
-        if (mkdir(dir_path.c_str(), 0755) < 0 && errno != EEXIST) {
-            result.passed = false;
-            result.message = "Cannot create socket directory: " + std::string(strerror(errno));
-            result.fix_suggestion = "Ensure " + dir_path + " is writable";
-            return result;
-        }
-        
-        // Check if writable
-        if (access(dir_path.c_str(), W_OK) < 0) {
-            result.passed = false;
-            result.message = "Socket directory not writable";
-            result.fix_suggestion = "Check permissions on " + dir_path;
-            return result;
-        }
-        
-        result.passed = true;
-        result.message = "Socket directory OK";
-        return result;
-    }
-    
-    /**
-     * Check libusb initialization
-     */
-    static CheckResult check_libusb() {
-        CheckResult result;
-
-        libusb_context* ctx = nullptr;
-        int rc = libusb_init(&ctx);
-
-        if (rc < 0) {
-            result.passed = false;
-            // Distinguish missing library vs init error
-            if (rc == LIBUSB_ERROR_NO_MEM) {
-                result.message = "libusb init failed: out of memory";
-            } else if (rc == LIBUSB_ERROR_ACCESS) {
-                result.message = "libusb init failed: insufficient privileges or udev rules";
-            } else if (rc == LIBUSB_ERROR_NO_DEVICE) {
-                result.message = "libusb init succeeded, but no USB devices found";
-                result.passed = true;  // still OK at startup
-            } else {
-                result.message = std::string("libusb init failed: ") + libusb_error_name(rc);
-            }
-
-            result.fix_suggestion = "Ensure libusb-1.0 runtime is installed:\n"
-                                    "Ubuntu/Debian: sudo apt install libusb-1.0-0\n"
-                                    "Fedora: sudo dnf install libusbx\n"
-                                    "Arch: sudo pacman -S libusb";
-
-            if (ctx) libusb_exit(ctx);
-            return result;
-        }
-
-        result.passed = true;
-        result.message = "initialized";
-        libusb_exit(ctx);
-        return result;
-    }
-        
-    /**
-     * Run all checks and report
-     */
-    static bool validate_all(const std::string& socket_dir, const std::string& socket_group) {
-        bool all_passed = true;
-        
-        syslog(LOG_INFO, "=== System Requirements Check ===");
-        
-     
-        // Check libusb
-        auto libusb_result = check_libusb();
-        log_check_result("libusb", libusb_result);
-        all_passed &= libusb_result.passed;
-
-        // Log privileges only
-        log_privileges();
-
-        if(!all_passed){
-            if(can_access_any_usb_device()) {
-                syslog(LOG_INFO, "[OK] %s: %s", "USB ACCESS", "passed");
-            }else{
-                syslog(LOG_ALERT, "[CRITICAL] %s: %s", "USB ACCESS", "failed. Unable to open any USB device");
-            }
-        }
-        
-        // Check socket group (warning only)
-        auto group_result = check_socket_group(socket_group);
-        log_check_result("Socket Group", group_result);
-        if (!group_result.passed) {
-            syslog(LOG_WARNING, "Socket group missing - clients may have access issues");
-        }
-        
-        // Check socket directory
-        auto dir_result = check_socket_directory(socket_dir);
-        log_check_result("Socket Directory", dir_result);
-        all_passed &= dir_result.passed;
-        
-        syslog(LOG_INFO, "=================================");
-        
-        return all_passed;
-    }
-    
+class NoteDaemonApp {
 private:
-    static void log_check_result(const char* check_name, const CheckResult& result) {
-        if (result.passed) {
-            syslog(LOG_INFO, "[OK] %s: %s", check_name, result.message.c_str());
-        } else {
-            syslog(LOG_ERR, "[FAIL] %s: %s", check_name, result.message.c_str());
-            if (!result.fix_suggestion.empty()) {
-                syslog(LOG_ERR, "  Fix: %s", result.fix_suggestion.c_str());
-            }
-        }
-    }
-};
-
-/**
- * Simple config parser that works with or without JSON library
- */
-class SimpleConfigParser {
-public:
-    std::map<std::string, std::string> values;
+    // Core framework components
+    ModuleLoader module_loader_;
+    ModuleRegistry module_registry_;
+    ModuleRoutingRegistry routing_registry_;
+    ErrorCollector error_collector_;
+    CoreConfig config_;
+    ConfigManager config_manager_;
     
-    bool parse_file(const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            return false;
-        }
-        
-        std::string line;
-        while (std::getline(file, line)) {
-            // Skip comments and empty lines
-            if (line.empty() || line[0] == '#' || line[0] == ';') {
-                continue;
-            }
-            
-            // Parse key=value
-            size_t eq_pos = line.find('=');
-            if (eq_pos != std::string::npos) {
-                std::string key = trim(line.substr(0, eq_pos));
-                std::string value = trim(line.substr(eq_pos + 1));
-                values[key] = value;
-            }
-        }
-        
-        return true;
-    }
-    
-    std::string get(const std::string& key, const std::string& default_val = "") const {
-        auto it = values.find(key);
-        return (it != values.end()) ? it->second : default_val;
-    }
-    
-    int get_int(const std::string& key, int default_val = 0) const {
-        auto it = values.find(key);
-        if (it != values.end()) {
-            try {
-                return std::stoi(it->second);
-            } catch (...) {
-                return default_val;
-            }
-        }
-        return default_val;
-    }
-    
-    bool get_bool(const std::string& key, bool default_val = false) const {
-        auto it = values.find(key);
-        if (it != values.end()) {
-            std::string val = it->second;
-            return (val == "true" || val == "1" || val == "yes" || val == "on");
-        }
-        return default_val;
-    }
-    
-private:
-    std::string trim(const std::string& str) {
-        size_t first = str.find_first_not_of(" \t\r\n");
-        if (first == std::string::npos) return "";
-        size_t last = str.find_last_not_of(" \t\r\n");
-        return str.substr(first, last - first + 1);
-    }
-};
-
-/**
- * Daemon configuration - ONLY configurable settings
- */
-
-class DaemonConfig {
-public:
-    // Socket configuration
-    std::string socket_path = "/run/netnotes/notedaemon.sock";
-    std::string socket_dir = "/run/netnotes";
-    std::string socket_group = "netnotes";
-    mode_t socket_permissions = 0660;  // rw-rw----
-    
-    // Logging
-    int log_level = LOG_INFO;
-    bool log_to_stderr = false;
-    
-    // USB/libusb settings
-    int usb_timeout_ms = 100;
-    int usb_discovery_interval_ms = 1000;
-    bool usb_auto_detach_kernel = true;  // REQUIRED for claiming
- 
-    // Security
-    bool require_group_membership = true;
-    std::vector<std::string> allowed_groups;
-    bool allow_root_bypass = true;
-    
-    // Performance
-    int max_clients = 10;
-    size_t max_queue_size = 1000;
-    int polling_interval_us = 1000;
-    int thread_pool_size = 4;
-    
-    // Heartbeat
-    bool heartbeat_enabled = true;
-    int heartbeat_interval_ms = 5000;
-    int heartbeat_timeout_ms = 15000;
-    int heartbeat_max_missed = 3;
-    
-    // Backpressure
-    int backpressure_max_unacked = 100;
-    int backpressure_resume_threshold = 50;
-    int backpressure_stale_timeout_ms = 30000;
-    
-    // Monitoring
-    bool stats_enabled = true;
-    int stats_interval_ms = 60000;
-    bool event_logging = false;
-    
-    // Advanced
-    int buffer_size = 8192;
-    int event_batch_size = 10;
-    bool use_epoll = true;
-    
-    // Debug
-    bool debug_dump_packets = false;
-    int debug_simulate_latency_ms = 0;
-    
-    /**
-     * Load configuration from file
-     */
-    bool load_from_file(const std::string& config_path) {
-        std::ifstream file(config_path);
-        if (!file.is_open()) {
-            syslog(LOG_INFO, "Config file not found at %s, using defaults", 
-                   config_path.c_str());
-            return false;
-        }
-        file.close();
-        
-        syslog(LOG_INFO, "Loading config from %s", config_path.c_str());
-        
-        
-        if (try_load_config(config_path)) {
-            syslog(LOG_INFO, "Configuration loaded from key=value format");
-            validate_config();
-            return true;
-        }
-        
-        syslog(LOG_WARNING, "Failed to parse config file, using defaults");
-        return false;
-    }
-    
-    
-    bool try_load_config(const std::string& path) {
-        SimpleConfigParser parser;
-        if (!parser.parse_file(path)) {
-            return false;
-        }
-        
-        // Socket
-        socket_path = parser.get("socket.path", socket_path);
-        socket_dir = parser.get("socket.dir", socket_dir);
-        socket_group = parser.get("socket.group", socket_group);
-        socket_permissions = static_cast<mode_t>(
-            parser.get_int("socket.permissions", socket_permissions));
-        
-        // Logging
-        std::string level = parser.get("logging.level", "info");
-        if (level == "debug") log_level = LOG_DEBUG;
-        else if (level == "info") log_level = LOG_INFO;
-        else if (level == "warning") log_level = LOG_WARNING;
-        else if (level == "error") log_level = LOG_ERR;
-        log_to_stderr = parser.get_bool("logging.stderr", log_to_stderr);
-        
-        // USB
-        usb_timeout_ms = parser.get_int("usb.timeout_ms", usb_timeout_ms);
-        usb_discovery_interval_ms = parser.get_int("usb.discovery_interval_ms", 
-                                                   usb_discovery_interval_ms);
-        usb_auto_detach_kernel = parser.get_bool("usb.auto_detach_kernel", 
-                                                usb_auto_detach_kernel);
-
-        // Security
-        require_group_membership = parser.get_bool("security.require_group", 
-                                                   require_group_membership);
-        allow_root_bypass = parser.get_bool("security.allow_root_bypass", 
-                                           allow_root_bypass);
-        
-        // Performance
-        max_clients = parser.get_int("performance.max_clients", max_clients);
-        max_queue_size = parser.get_int("performance.max_queue_size", max_queue_size);
-        polling_interval_us = parser.get_int("performance.polling_interval_us", 
-                                            polling_interval_us);
-        thread_pool_size = parser.get_int("performance.thread_pool_size", 
-                                         thread_pool_size);
-        
-        // Heartbeat
-        heartbeat_enabled = parser.get_bool("heartbeat.enabled", heartbeat_enabled);
-        heartbeat_interval_ms = parser.get_int("heartbeat.interval_ms", 
-                                              heartbeat_interval_ms);
-        heartbeat_timeout_ms = parser.get_int("heartbeat.timeout_ms", 
-                                             heartbeat_timeout_ms);
-        heartbeat_max_missed = parser.get_int("heartbeat.max_missed", 
-                                             heartbeat_max_missed);
-        
-        // Backpressure
-        backpressure_max_unacked = parser.get_int("backpressure.max_unacknowledged", 
-                                                 backpressure_max_unacked);
-        backpressure_resume_threshold = parser.get_int("backpressure.resume_threshold", 
-                                                      backpressure_resume_threshold);
-        backpressure_stale_timeout_ms = parser.get_int("backpressure.stale_timeout_ms", 
-                                                      backpressure_stale_timeout_ms);
-        
-        // Monitoring
-        stats_enabled = parser.get_bool("monitoring.stats_enabled", stats_enabled);
-        stats_interval_ms = parser.get_int("monitoring.stats_interval_ms", 
-                                          stats_interval_ms);
-        event_logging = parser.get_bool("monitoring.event_logging", event_logging);
-        
-        // Advanced
-        buffer_size = parser.get_int("advanced.buffer_size", buffer_size);
-        event_batch_size = parser.get_int("advanced.event_batch_size", event_batch_size);
-        use_epoll = parser.get_bool("advanced.use_epoll", use_epoll);
-        
-        // Debug
-        debug_dump_packets = parser.get_bool("debug.dump_packets", debug_dump_packets);
-        debug_simulate_latency_ms = parser.get_int("debug.simulate_latency_ms", 
-                                                   debug_simulate_latency_ms);
-        
-        return true;
-    }
-    
-    /**
-     * Validate configuration and warn about problematic settings
-     */
-    void validate_config() {
-        // Warn if kernel detach is disabled (won't work)
-        if (!usb_auto_detach_kernel) {
-            syslog(LOG_WARNING, 
-                   "usb.auto_detach_kernel=false will prevent device claiming!");
-        }
-        
-        // Warn if permissions too restrictive
-        if ((socket_permissions & 0060) == 0) {
-            syslog(LOG_WARNING, 
-                   "Socket permissions 0%o may prevent group access", socket_permissions);
-        }
-        
-        // Warn if heartbeat disabled
-        if (!heartbeat_enabled) {
-            syslog(LOG_WARNING, 
-                   "Heartbeat disabled - stale connections won't be detected");
-        }
-        
-        // Warn about debug settings in production
-        if (debug_dump_packets) {
-            syslog(LOG_WARNING, 
-                   "Packet dumping enabled - will generate lots of logs!");
-        }
-        
-        if (event_logging) {
-            syslog(LOG_WARNING, 
-                   "Event logging enabled - VERY verbose!");
-        }
-    }
-    
-    /**
-     * Print configuration to syslog
-     */
-    void log_config() const {
-        syslog(LOG_INFO, "=== Daemon Configuration ===");
-        syslog(LOG_INFO, "Socket: %s (group=%s, perms=0%o)", 
-               socket_path.c_str(), socket_group.c_str(), socket_permissions);
-        syslog(LOG_INFO, "USB: timeout=%dms, discovery=%dms, auto_detach=%d", 
-               usb_timeout_ms, usb_discovery_interval_ms, usb_auto_detach_kernel);
-        syslog(LOG_INFO, "Security: require_group=%d, root_bypass=%d", 
-               require_group_membership, allow_root_bypass);
-        syslog(LOG_INFO, "Performance: clients=%d, queue=%zu, poll=%dus, threads=%d", 
-               max_clients, max_queue_size, polling_interval_us, thread_pool_size);
-        syslog(LOG_INFO, "Heartbeat: enabled=%d, interval=%dms, timeout=%dms", 
-               heartbeat_enabled, heartbeat_interval_ms, heartbeat_timeout_ms);
-        syslog(LOG_INFO, "Backpressure: max_unacked=%d, resume=%d", 
-               backpressure_max_unacked, backpressure_resume_threshold);
-        syslog(LOG_INFO, "===========================");
-    }
-};
-
-/**
- * Get config path from user's home directory
- */
-std::string get_config_path() {
-    const char* home = getenv("HOME");
-    if (!home) {
-        struct passwd* pw = getpwuid(getuid());
-        if (pw) {
-            home = pw->pw_dir;
-        }
-    }
-    
-    if (home) {
-        return std::string(home) + "/.netnotes/config";
-    }
-    
-    return "";
-}
-
-/**
- * Main daemon class
- */
-class NoteDaemon {
-private:
-    libusb_context* usb_ctx = nullptr;
-    int server_socket = -1;
-    DaemonConfig config;
+    libusb_context* usb_ctx_ = nullptr;
+    int server_socket_ = -1;
 
 public:
     int run() {
-        // RAII guard to ensure cleanup() is called when run() returns
+        // RAII cleanup
         struct CleanupGuard {
-            NoteDaemon* daemon;
-            CleanupGuard(NoteDaemon* d) : daemon(d) {}
+            NoteDaemonApp* daemon;
+            CleanupGuard(NoteDaemonApp* d) : daemon(d) {}
             ~CleanupGuard() { daemon->cleanup(); }
         } guard(this);
         
         signal(SIGTERM, signal_handler);
         signal(SIGINT, signal_handler);
 
-        // Open syslog
+        // Setup logging
         int log_options = LOG_PID;
-        if (config.log_to_stderr) {
+        if (config_.log_to_stderr) {
             log_options |= LOG_PERROR;
         }
         openlog("notedaemon", log_options, LOG_DAEMON);
-        setlogmask(LOG_UPTO(config.log_level));
+        setlogmask(LOG_UPTO(config_.log_level));
         
-        syslog(LOG_INFO, "NoteDaemon starting (capability-aware protocol)");
+        // Start async logger (runs on its own thread)
+        AsyncLogger::Logger::start();
+        
+        AsyncLogger::Logger::log_info("NoteDaemon starting (modular architecture) v" + std::string(CORE_API_VERSION.data()), "NoteDaemon");
 
         // Load configuration
-        std::string config_path = get_config_path();
-        if (!config_path.empty()) {
-            config.load_from_file(config_path);
-        } else {
-            syslog(LOG_WARNING, "Could not determine config path, using defaults");
-        }
-        
-        config.log_config();
+        load_configuration();
 
-        // Validate Linux requirements
-        if (!LinuxRequirements::validate_all(config.socket_dir, config.socket_group)) {
+        // Validate system requirements
+        if (!validate_requirements()) {
             syslog(LOG_ERR, "System requirements not met, cannot start");
             return 1;
         }
 
         // Initialize libusb
-        int result = libusb_init(&usb_ctx);
-        if (result < 0) {
-            syslog(LOG_ERR, "Failed to initialize libusb: %s", 
-                   libusb_error_name(result));
+        if (!init_libusb()) {
             return 1;
         }
 
         // Setup socket
         if (!setup_socket()) {
-            libusb_exit(usb_ctx);
             return 1;
         }
 
-        syslog(LOG_INFO, "Daemon ready on %s", config.socket_path.c_str());
-
-        // Fork a monitor process that will clean up orphaned devices if we crash.
-        // The monitor runs in its own session (setsid) so it survives if the
-        // parent's process group is killed. It watches our PID and reattaches
-        // kernel drivers on our termination.
-        pid_t monitor_pid = fork();
-        if (monitor_pid < 0) {
-            syslog(LOG_WARNING, "Failed to fork process monitor: %s",
-                   strerror(errno));
-        } else if (monitor_pid == 0) {
-            // Child — exec the monitor process
-            char pid_str[32];
-            snprintf(pid_str, sizeof(pid_str), "%d", getpid());
-            execl("/usr/local/bin/process_monitor", "process_monitor", pid_str,
-                  nullptr);
-            // If execl fails, fall through to normal exit
-            syslog(LOG_ERR, "Failed to exec process_monitor: %s",
-                   strerror(errno));
-            _exit(1);
-        } else {
-            // Parent — continue normal execution
-            syslog(LOG_INFO, "Process monitor started (PID %d)", monitor_pid);
+        // Load and initialize modules
+        AsyncLogger::Logger::log_info("About to call load_modules()", "NoteDaemon");
+        try {
+            load_modules();
+            AsyncLogger::Logger::log_info("load_modules() returned, continuing...", "NoteDaemon");
+        } catch (const std::exception& e) {
+            AsyncLogger::Logger::log_error("load_modules() threw exception: " + std::string(e.what()), "NoteDaemon");
+            throw;
+        } catch (...) {
+            AsyncLogger::Logger::log_error("load_modules() threw unknown exception", "NoteDaemon");
+            throw;
         }
+        
+        // Register GET_MODULES handler
+        if (auto* core_module = module_registry_.get("notedaemon")) {
+            core_module->get_handler_registry()
+                .register_handler(NoteMessaging::ProtocolMessages::GET_MODULES,
+                                 [this](const NoteBytes::Object& /*msg*/) {
+                                     // Get client_fd from somewhere - for now just log
+                                     syslog(LOG_DEBUG, "GET_MODULES received");
+                                 });
+        } else {
+            syslog(LOG_DEBUG, "Core module 'notedaemon' not registered; skipping GET_MODULES handler registration");
+        }
+
+        syslog(LOG_INFO, "Daemon ready on %s", config_.socket_path.c_str());
+
+        // Fork process monitor if needed
+        AsyncLogger::Logger::log_info("About to call fork_process_monitor()", "NoteDaemon");
+        fork_process_monitor();
+        AsyncLogger::Logger::log_info("fork_process_monitor() completed", "NoteDaemon");
 
         // Main event loop
-        while (g_running) {
-            fd_set read_fds;
-            FD_ZERO(&read_fds);
-            FD_SET(server_socket, &read_fds);
+        AsyncLogger::Logger::log_info("About to call main_loop()", "NoteDaemon");
+        main_loop();
+        AsyncLogger::Logger::log_info("main_loop() returned", "NoteDaemon");
 
-            struct timeval timeout = {1, 0};
-            int activity = select(server_socket + 1, &read_fds, nullptr, nullptr, &timeout);
+        AsyncLogger::Logger::log_info("NoteDaemon main_loop returned, about to stop...", "NoteDaemon");
 
-            if (activity < 0 && errno != EINTR) {
-                syslog(LOG_ERR, "Select error: %s", strerror(errno));
-                break;
-            }
-
-            if (activity > 0 && FD_ISSET(server_socket, &read_fds)) {
-                handle_client();
-            }
-        }
-
-        cleanup();
         syslog(LOG_INFO, "NoteDaemon stopped");
         closelog();
         return 0;
     }
 
 private:
-    bool setup_socket() {
-        // Create socket directory
-        if (mkdir(config.socket_dir.c_str(), 0755) < 0 && errno != EEXIST) {
-            syslog(LOG_ERR, "Failed to create socket directory %s: %s",
-                   config.socket_dir.c_str(), strerror(errno));
+    void load_configuration() {
+        // Load core config
+        std::string config_path = get_config_path();
+        if (!config_path.empty()) {
+            config_.load_from_file(config_path);
+        }
+        
+        // Log config manually since CoreConfig doesn't have log_config
+        syslog(LOG_INFO, "=== Daemon Configuration ===");
+        syslog(LOG_INFO, "Socket: %s (group=%s, perms=0%o)", 
+               config_.socket_path.c_str(), config_.socket_group.c_str(), 
+               (int)config_.socket_permissions);
+        syslog(LOG_INFO, "Module directory: %s", config_.module_directory.c_str());
+        syslog(LOG_INFO, "Module strict_load: %d", config_.strict_load);
+        syslog(LOG_INFO, "Module health_check: %d", config_.health_check);
+        syslog(LOG_INFO, "===========================");
+    }
+    
+    bool validate_requirements() {
+        // Check libusb
+        libusb_context* ctx = nullptr;
+        int rc = libusb_init(&ctx);
+        if (rc < 0) {
+            syslog(LOG_ERR, "libusb init failed: %s", libusb_error_name(rc));
             return false;
         }
-
+        
+        // Check USB access
+        bool has_access = false;
+        libusb_device** list = nullptr;
+        ssize_t cnt = libusb_get_device_list(ctx, &list);
+        if (cnt >= 0) {
+            for (ssize_t i = 0; i < cnt; i++) {
+                libusb_device_handle* handle = nullptr;
+                if (libusb_open(list[i], &handle) == 0) {
+                    has_access = true;
+                    libusb_close(handle);
+                }
+            }
+            libusb_free_device_list(list, 1);
+        }
+        
+        libusb_exit(ctx);
+        
+        if (!has_access) {
+            syslog(LOG_WARNING, "No accessible USB devices found");
+        }
+        
+        // Check socket directory
+        if (mkdir(config_.socket_dir.c_str(), 0755) < 0 && errno != EEXIST) {
+            syslog(LOG_ERR, "Cannot create socket directory: %s", strerror(errno));
+            return false;
+        }
+        
+        if (access(config_.socket_dir.c_str(), W_OK) < 0) {
+            syslog(LOG_ERR, "Socket directory not writable");
+            return false;
+        }
+        
+        return true;
+    }
+    
+    bool init_libusb() {
+        int result = libusb_init(&usb_ctx_);
+        if (result < 0) {
+            syslog(LOG_ERR, "Failed to initialize libusb: %s", 
+                   libusb_error_name(result));
+            return false;
+        }
+        
+        // Register hotplug callbacks (keep existing functionality)
+        DeviceSession::register_hotplug_callbacks(usb_ctx_);
+        
+        return true;
+    }
+    
+    bool setup_socket() {
         // Remove old socket
-        unlink(config.socket_path.c_str());
+        unlink(config_.socket_path.c_str());
 
         // Create socket
-        server_socket = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (server_socket < 0) {
+        server_socket_ = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (server_socket_ < 0) {
             syslog(LOG_ERR, "Failed to create socket: %s", strerror(errno));
             return false;
         }
@@ -731,44 +254,171 @@ private:
         struct sockaddr_un addr;
         memset(&addr, 0, sizeof(addr));
         addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, config.socket_path.c_str(), sizeof(addr.sun_path) - 1);
+        strncpy(addr.sun_path, config_.socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
-        if (bind(server_socket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        if (bind(server_socket_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             syslog(LOG_ERR, "Failed to bind socket: %s", strerror(errno));
-            safe_close(server_socket);
+            safe_close(server_socket_);
             return false;
         }
 
-        // Set socket permissions
-        if (chmod(config.socket_path.c_str(), config.socket_permissions) < 0) {
-            syslog(LOG_WARNING, "Failed to set socket permissions: %s", 
-                   strerror(errno));
+        // Set permissions
+        if (chmod(config_.socket_path.c_str(), config_.socket_permissions) < 0) {
+            syslog(LOG_WARNING, "Failed to set socket permissions: %s", strerror(errno));
         }
 
-        // Set socket group
-        struct group* grp = getgrnam(config.socket_group.c_str());
+        // Set group
+        struct group* grp = getgrnam(config_.socket_group.c_str());
         if (grp) {
-            if (chown(config.socket_path.c_str(), -1, grp->gr_gid) < 0) {
-                syslog(LOG_WARNING, "Failed to set socket group: %s", 
-                       strerror(errno));
+            if (chown(config_.socket_path.c_str(), -1, grp->gr_gid) < 0) {
+                syslog(LOG_WARNING, "Failed to set socket group: %s", strerror(errno));
             }
         }
 
         // Listen
-        if (listen(server_socket, 5) < 0) {
+        if (listen(server_socket_, 5) < 0) {
             syslog(LOG_ERR, "Failed to listen on socket: %s", strerror(errno));
-            safe_close(server_socket);
+            safe_close(server_socket_);
             return false;
         }
 
         return true;
     }
+    
+    void load_modules() {
+        syslog(LOG_INFO, "Loading modules from: %s", config_.module_directory.c_str());
+        
+        auto modules = module_loader_.load_all(config_.module_directory);
+        
+        if (modules.empty()) {
+            syslog(LOG_WARNING, "No modules loaded - running in legacy mode");
+            return;
+        }
+        
+        // Initialize each module
+        for (IModule* module : modules) {
+            std::string name(module->name());
+            syslog(LOG_INFO, "Initializing module: %s", name.c_str());
+            
+            // Load module config
+            std::string config_path = config_.module_directory + "/" + name + "/config.json";
+            auto config_result = config_manager_.load_module_config(name, config_path);
+            
+            if (auto* err = std::get_if<Error>(&config_result)) {
+                syslog(LOG_ERR, "Failed to load config for %s: %s", 
+                       name.c_str(), err->message().data());
+                if (config_.strict_load) {
+                    syslog(LOG_ERR, "strict_load=true, failing startup");
+                    continue;
+                }
+            }
+            
+            // Get config for init
+            const auto* config_json = config_manager_.get_config(name);
+            Json init_config = config_json ? *config_json : Json::object();
+            
+            // Initialize module
+            Error init_err = module->init(init_config);
+            if (init_err.failed()) {
+                syslog(LOG_ERR, "Failed to init module %s: %s",
+                       name.c_str(), init_err.message().data());
+                if (config_.strict_load) {
+                    continue;
+                }
+            }
+            
+            // Health check
+            if (config_.health_check) {
+                Error health_err = module->check_health(std::string(CORE_API_VERSION));
+                if (health_err.failed()) {
+                    syslog(LOG_ERR, "Module %s health check failed: %s",
+                           name.c_str(), health_err.message().data());
+                    if (config_.strict_load) {
+                        continue;
+                    }
+                }
+            }
+            
+            // Register module
+            Error reg_err = module_registry_.register_module(module);
+            if (reg_err.failed()) {
+                syslog(LOG_ERR, "Failed to register module %s: %s",
+                       name.c_str(), reg_err.message().data());
+                continue;
+            }
+            
+            // Register message types for routing
+            auto types = module->get_handled_message_types();
+            routing_registry_.register_module(name, types);
+            syslog(LOG_INFO, "Module %s handles: %zu message types", 
+                   name.c_str(), types.size());
+            
+            // Register with error collector
+            error_collector_.register_module(module);
+            
+            // Start module
+            Error start_err = module->start();
+            if (start_err.failed()) {
+                syslog(LOG_ERR, "Failed to start module %s: %s",
+                       name.c_str(), start_err.message().data());
+            } else {
+                syslog(LOG_INFO, "Module %s started successfully", name.c_str());
+            }
+        }
+        
+        AsyncLogger::Logger::log_info("[Main] About to log routing table", "NoteDaemon");
+        syslog(LOG_INFO, "[Main] Logging routing table - about to call get_all_routes()");
+        auto routes = routing_registry_.get_all_routes();
+        syslog(LOG_INFO, "[Main] get_all_routes() returned, about to log routing table size");
+        AsyncLogger::Logger::log_info("[Main] Routing table has " + std::to_string(routes.size()) + " entries", "NoteDaemon");
+        syslog(LOG_INFO, "Routing table has %zu entries", routes.size());
+    }
+    
+    void fork_process_monitor() {
+        // Fork a monitor process
+        AsyncLogger::Logger::log_info("[Process Monitor] About to fork process monitor", "NoteDaemon");
+        pid_t monitor_pid = fork();
+        if (monitor_pid < 0) {
+            AsyncLogger::Logger::log_warning("[Process Monitor] Failed to fork: " + std::string(strerror(errno)), "NoteDaemon");
+        } else if (monitor_pid == 0) {
+            // Child - exec monitor
+            char pid_str[32];
+            snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+            execl("/usr/local/bin/process_monitor", "process_monitor", pid_str, nullptr);
+            AsyncLogger::Logger::log_error("[Process Monitor] Failed to exec process_monitor: " + std::string(strerror(errno)), "NoteDaemon");
+            _exit(1);
+        } else {
+            AsyncLogger::Logger::log_info("[Process Monitor] Process monitor started (PID " + std::to_string(monitor_pid) + ")", "NoteDaemon");
+        }
+    }
+    
+    void main_loop() {
+        AsyncLogger::Logger::log_info("Main loop started, waiting for connections...", "NoteDaemon");
+        while (g_running) {
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(server_socket_, &read_fds);
 
+            struct timeval timeout = {1, 0};
+            int activity = select(server_socket_ + 1, &read_fds, nullptr, nullptr, &timeout);
+
+            if (activity < 0 && errno != EINTR) {
+                AsyncLogger::Logger::log_error("Select error: " + std::string(strerror(errno)), "NoteDaemon");
+                break;
+            }
+
+            if (activity > 0 && FD_ISSET(server_socket_, &read_fds)) {
+                handle_client();
+            }
+        }
+        AsyncLogger::Logger::log_info("Main loop exited... g_running=" + std::string(g_running ? "true" : "false"), "NoteDaemon");
+    }
+    
     void handle_client() {
         struct sockaddr_un client_addr;
         socklen_t client_len = sizeof(client_addr);
         
-        int client_fd = accept(server_socket, 
+        int client_fd = accept(server_socket_, 
                               (struct sockaddr*)&client_addr, 
                               &client_len);
         if (client_fd < 0) {
@@ -780,8 +430,7 @@ private:
         struct ucred creds;
         socklen_t len = sizeof(creds);
         if (getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &creds, &len) < 0) {
-            syslog(LOG_WARNING, "Failed to get peer credentials: %s", 
-                   strerror(errno));
+            syslog(LOG_WARNING, "Failed to get peer credentials: %s", strerror(errno));
             safe_close(client_fd);
             return;
         }
@@ -789,57 +438,224 @@ private:
         syslog(LOG_INFO, "Client connected: uid=%d, gid=%d, pid=%d", 
                creds.uid, creds.gid, creds.pid);
         
-        // Check group membership if required
-        if (config.require_group_membership && !check_group_access(creds.uid)) {
-            syslog(LOG_WARNING, "Client uid=%d denied: not in allowed groups", 
-                   creds.uid);
+        // Check group access
+        if (!check_group_access(creds.uid)) {
+            syslog(LOG_WARNING, "Client uid=%d denied: not in allowed groups", creds.uid);
             safe_close(client_fd);
             return;
         }
         
-        // Create device session
-        DeviceSession session(usb_ctx, client_fd, creds.pid);
-        session.readSocket();
+        // Route based on whether modules are loaded
+        if (module_registry_.size() > 0) {
+            // Use modular routing
+            // IMPORTANT: Don't close client_fd here!
+            // The module (e.g., NoteUSB) takes ownership of the socket and will
+            // close it when the session ends (when the background thread exits).
+            syslog(LOG_INFO, "[NoteDaemon] Using modular routing for client pid=%d", creds.pid);
+            handle_client_modular(client_fd, creds.pid);
+            // Note: The module owns the socket lifecycle now - don't close it here
+            syslog(LOG_INFO, "Client session ended: pid=%d (socket transferred to module)", creds.pid);
+        } else {
+            // Fall back to legacy DeviceSession
+            // For legacy mode, we own the socket lifecycle
+            syslog(LOG_INFO, "[NoteDaemon] Using legacy DeviceSession for client pid=%d", creds.pid);
+            DeviceSession session(usb_ctx_, client_fd, creds.pid);
+            session.readSocket();
+            
+            syslog(LOG_INFO, "Client session ended: pid=%d", creds.pid);
+            safe_close(client_fd);
+        }
+    }
+    
+    void handle_client_modular(int client_fd, pid_t client_pid) {
+        syslog(LOG_INFO, "[NoteDaemon] Client connected: pid=%d", client_pid);
         
-        syslog(LOG_INFO, "Client session ended: pid=%d", creds.pid);
-        safe_close(client_fd);
+        syslog(LOG_DEBUG, "Using modular routing for client pid=%d", client_pid);
+        
+        // Check for GET_MODULES command (daemon-level, before module handling)
+        NoteBytes::Reader reader(client_fd, false);
+        auto cmd = reader.read_object();
+        auto* cmd_val = cmd.get(NoteMessaging::Keys::CMD);
+        if (cmd_val) {
+            if (*cmd_val == NoteMessaging::ProtocolMessages::GET_MODULES) {
+                syslog(LOG_INFO, "[NoteDaemon] Handling GET_MODULES for client pid=%d", client_pid);
+                handle_get_modules(client_fd);
+                return;
+            }
+        }
+        
+        // Route to module
+        auto* note_usb_module = module_registry_.get("note_usb");
+        if (note_usb_module) {
+            // Call module's handle_client to create session
+            Error err = note_usb_module->handle_client(client_fd, client_pid);
+            if (err.failed()) {
+                syslog(LOG_ERR, "NoteUSB: failed to handle client pid=%d: %s",
+                       client_pid, err.message().data());
+                safe_close(client_fd);
+            }
+        } else {
+            syslog(LOG_WARNING, "No module handles client pid=%d", client_pid);
+            safe_close(client_fd);
+        }
+        
+        // =============================================================================
+        // ORIGINAL MESSAGE LOOP CODE (commented out for testing)
+        // =============================================================================
+        // // Read messages and route to modules
+        // for (;;) {
+        //     try {
+        //         auto routed = InputPacket::receive_message(client_fd);
+        //
+        //         if (!routed.isValid()) {
+        //             syslog(LOG_ERR, "[NoteDaemon] Invalid message received");
+        //             break;
+        //         }
+        //
+        //         NoteBytes::Object message = NoteBytes::Object::deserialize(
+        //             routed.message.data().data(),
+        //             routed.message.data().size());
+        //
+        //         // Log received message
+        //         auto* event_val = message.get(NoteMessaging::Keys::EVENT);
+        //         auto* cmd_val = message.get(NoteMessaging::Keys::CMD);
+        //
+        //         std::string event_type = event_val ? event_val->as_string() : "";
+        //         std::string cmd_type = cmd_val ? cmd_val->as_string() : "";
+        //
+        //         syslog(LOG_INFO, "[NoteDaemon] <<< Received: event=%s, cmd=%s",
+        //                event_type.c_str(), cmd_type.c_str());
+        //
+        //         // Check for GET_MODULES request
+        //         if (event_type == NoteMessaging::ProtocolMessages::GET_MODULES.as_string() ||
+        //             cmd_type == NoteMessaging::ProtocolMessages::GET_MODULES.as_string()) {
+        //             syslog(LOG_INFO, "[NoteDaemon] Handling GET_MODULES");
+        //             handle_get_modules(client_fd);
+        //             break;
+        //         }
+        //
+        //         // Log device_id if present
+        //         auto* device_id_val = message.get(NoteMessaging::Keys::DEVICE_ID);
+        //         if (device_id_val) {
+        //             syslog(LOG_DEBUG, "[NoteDaemon] <<< device_id=%s",
+        //                    device_id_val->as_string().c_str());
+        //         }
+        //
+        //         // Route to appropriate module
+        //         std::string module_id = routed.module_id.as_string();
+        //         if (!module_id.empty()) {
+        //             // Route to specific module
+        //             auto* module = module_registry_.get(module_id);
+        //             if (module) {
+        //                 // Dispatch to module's handler registry
+        //                 Error err = module->get_handler_registry().dispatch(message);
+        //                 if (err.failed()) {
+        //                     syslog(LOG_WARNING, "Module %s failed to handle message: %s",
+        //                            module_id.c_str(), err.message().data());
+        //                 }
+        //             } else {
+        //                 syslog(LOG_WARNING, "Module %s not found for routing", module_id.c_str());
+        //             }
+        //         } else {
+        //             // No module_id specified, try to route by message type
+        //             // This is for legacy compatibility
+        //             syslog(LOG_DEBUG, "No module_id in message, trying legacy routing");
+        //
+        //             // Try to find a module that handles this message type
+        //             std::string message_type = event_type.empty() ? cmd_type : event_type;
+        //             std::string module_id = routing_registry_.lookup_module(message_type);
+        //
+        //             if (!module_id.empty()) {
+        //                 auto* module = module_registry_.get(module_id);
+        //                 if (module) {
+        //                     Error err = module->get_handler_registry().dispatch(message);
+        //                     if (err.failed()) {
+        //                         syslog(LOG_WARNING, "Module %s failed to handle message: %s",
+        //                                module_id.c_str(), err.message().data());
+        //                     }
+        //                 }
+        //             } else {
+        //                 syslog(LOG_WARNING, "No module handles message type: %s",
+        //                        message_type.c_str());
+        //             }
+        //         }
+        //
+        //     } catch (const std::exception& e) {
+        //         syslog(LOG_ERR, "Error in message loop: %s", e.what());
+        //         break;
+        //     }
+        // }
+        // =============================================================================
+        // END OF COMMENTED CODE
+        // =============================================================================
+
+        // Note: Message handling is done by the module itself
+        // The module's handle_client() sets up the message loop internally
+        // 
+        // IMPORTANT: Do NOT call cleanup_client here!
+        // The session should remain alive while the client is connected.
+        // The module will handle cleanup when the client's socket is closed
+        // (i.e., when the session's read loop exits).
+        syslog(LOG_INFO, "[NoteDaemon] Module handling complete - leaving session alive");
+    }
+    
+    void handle_get_modules(int client_fd) {
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::MODULE_LIST);
+        
+        NoteBytes::Array modules_array;
+        
+        // Get all registered modules
+        auto modules = module_registry_.get_all_modules();
+        for (const auto& module : modules) {
+            NoteBytes::Object module_info;
+            module_info.add(NoteMessaging::Keys::NAME, module->name());
+            module_info.add(NoteMessaging::Keys::VERSION, module->version());
+            module_info.add(NoteMessaging::Keys::DESCRIPTION, module->description());
+            module_info.add(NoteMessaging::Keys::CAPABILITIES, module->capabilities());
+            
+            // Get handled message types
+            std::vector<std::string> handlers = module->get_handled_message_types();
+            NoteBytes::Array handlers_array;
+            for (const auto& handler : handlers) {
+                handlers_array.add(NoteBytes::Value(handler));
+            }
+            module_info.add(NoteMessaging::Keys::HANDLERS, handlers_array.as_value());
+            
+            modules_array.add(module_info.as_value());
+        }
+        
+        response.add(NoteMessaging::ProtocolMessages::MODULE_LIST, modules_array.as_value());
+        
+        // Send response
+        NoteBytes::Writer writer(client_fd, false);
+        writer.write(response);
+        writer.flush();
+        
+        syslog(LOG_INFO, "Sent module list: %zu modules", modules.size());
     }
     
     bool check_group_access(uid_t uid) {
-        // Root bypass
-        if (uid == 0 && config.allow_root_bypass) {
-            return true;
+        if (uid == 0) {
+            return true;  // Root bypass
         }
         
-        // Get user info
         struct passwd* pw = getpwuid(uid);
         if (!pw) {
             return false;
         }
         
-        // Check primary group
-        struct group* primary_grp = getgrgid(pw->pw_gid);
-        if (primary_grp && config.socket_group == primary_grp->gr_name) {
-            return true;
-        }
-        
-        // Check socket group membership
-        struct group* sock_grp = getgrnam(config.socket_group.c_str());
+        // Check socket group
+        struct group* sock_grp = getgrnam(config_.socket_group.c_str());
         if (sock_grp) {
+            // Check primary group
+            if (pw->pw_gid == sock_grp->gr_gid) {
+                return true;
+            }
+            
+            // Check member list
             for (int i = 0; sock_grp->gr_mem[i] != nullptr; i++) {
                 if (strcmp(sock_grp->gr_mem[i], pw->pw_name) == 0) {
-                    return true;
-                }
-            }
-        }
-        
-        // Check allowed_groups list
-        for (const auto& group_name : config.allowed_groups) {
-            struct group* grp = getgrnam(group_name.c_str());
-            if (!grp) continue;
-            
-            for (int i = 0; grp->gr_mem[i] != nullptr; i++) {
-                if (strcmp(grp->gr_mem[i], pw->pw_name) == 0) {
                     return true;
                 }
             }
@@ -849,21 +665,58 @@ private:
     }
 
     void cleanup() {
-        // Shutdown all sessions first - release devices and reattach kernel drivers
-        // This needs the USB context to be valid
+        AsyncLogger::Logger::log_info("cleanup() called - shutting down modules...", "NoteDaemon");
+        
+        // Clear non-owning registries before unloading module shared libraries.
+        error_collector_.clear();
+        module_registry_.clear();
+        
+        // Shutdown all modules
+        module_loader_.unload_all();
+        
+        // Legacy cleanup
         DeviceSession::shutdown_all_sessions();
         
-        if (server_socket >= 0) {
-            safe_close(server_socket);
-            unlink(config.socket_path.c_str());
+        if (server_socket_ >= 0) {
+            safe_close(server_socket_);
+            unlink(config_.socket_path.c_str());
         }
         
-        if (usb_ctx) {
-            libusb_exit(usb_ctx);
-            usb_ctx = nullptr;  // Mark as cleaned up
+        if (usb_ctx_) {
+            libusb_exit(usb_ctx_);
+            usb_ctx_ = nullptr;
         }
+        
+        // Stop async logger
+        AsyncLogger::Logger::stop();
+    }
+    
+    // ===== MODULE REGISTRY HELPERS =====
+    
+    std::vector<NoteDaemon::IModule*> get_all_modules() {
+        return module_registry_.get_all_modules();
+    }
+    
+    std::string get_config_path() {
+        const char* home = getenv("HOME");
+        if (!home) {
+            struct passwd* pw = getpwuid(getuid());
+            if (pw) {
+                home = pw->pw_dir;
+            }
+        }
+        
+        if (home) {
+            return std::string(home) + "/.netnotes/config";
+        }
+        
+        return "";
     }
 };
+
+// Include LinuxRequirements from the original code
+// For now, we'll include it inline or from utils
+// This is a minimal implementation for the refactor
 
 /**
  * Main entry point
@@ -883,48 +736,44 @@ int main(int argc, char* argv[]) {
     }
     
     if (show_help) {
-        fprintf(stderr, "NetNotes IO Daemon\n");
+        fprintf(stderr, "NetNotes IO Daemon (Modular)\n");
         fprintf(stderr, "Usage: %s [OPTIONS]\n\n", argv[0]);
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  -h, --help     Show this help message\n");
         fprintf(stderr, "  -c, --check    Check system requirements and exit\n\n");
         fprintf(stderr, "Configuration:\n");
         fprintf(stderr, "  Config file: ~/.netnotes/config (key=value)\n");
+        fprintf(stderr, "  Module directory: /etc/netnotes/modules\n");
         fprintf(stderr, "  Socket: /run/netnotes/notedaemon.sock\n\n");
-        fprintf(stderr, "Requirements:\n");
-        fprintf(stderr, "  - Root privileges OR proper udev rules\n");
-        fprintf(stderr, "  - Group 'netnotes' for socket access\n");
-        fprintf(stderr, "  - libusb-1.0\n\n");
-        fprintf(stderr, "Setup:\n");
-        fprintf(stderr, "  1. Create group: sudo groupadd netnotes\n");
-        fprintf(stderr, "  2. Add users: sudo usermod -aG netnotes USERNAME\n");
-        fprintf(stderr, "  3. Run daemon: sudo ./notedaemon\n");
         return 0;
     }
-    
-    // No root-only check: rely on udev rules and device node permissions
-    // If device access fails, LinuxRequirements will print a warning and exit.
     
     // Check-only mode
     if (check_only) {
         openlog("notedaemon-check", LOG_PERROR | LOG_PID, LOG_DAEMON);
         
-        DaemonConfig config;
-        std::string config_path = get_config_path();
+        CoreConfig config;
+        std::string config_path;
+        const char* home = getenv("HOME");
+        if (home) {
+            config_path = std::string(home) + "/.netnotes/config";
+        }
         if (!config_path.empty()) {
             config.load_from_file(config_path);
         }
         
-        bool passed = LinuxRequirements::validate_all(
-            config.socket_dir, 
-            config.socket_group
-        );
+        // Simple check - just check if we can init libusb
+        libusb_context* ctx = nullptr;
+        bool passed = (libusb_init(&ctx) == 0);
+        if (passed) {
+            libusb_exit(ctx);
+        }
         
         closelog();
         return passed ? 0 : 1;
     }
     
     // Run daemon
-    NoteDaemon daemon;
+    NoteDaemonApp daemon;
     return daemon.run();
 }

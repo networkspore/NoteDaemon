@@ -10,15 +10,33 @@ pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED)
 
-# Source files
-file(GLOB SOURCES src/*.cpp)
+# Source files - main daemon (excluding core which is built differently for now)
+file(GLOB SOURCES 
+    src/main.cpp
+    src/device_session.cpp
+    src/device_registry.cpp
+    src/keyboard_capture_lowlatency.cpp
+)
+
+# Core framework sources
+set(CORE_SOURCES
+    src/core/module_loader.cpp
+    src/core/module_registry.cpp
+    src/core/error_collector.cpp
+    src/core/config_manager.cpp
+    src/core/encryption_api.cpp
+)
+
+# Combine all sources
+set(ALL_SOURCES ${SOURCES} ${CORE_SOURCES})
 
 # Executable
-add_executable(note-daemon ${SOURCES})
+add_executable(note-daemon ${ALL_SOURCES})
 
 # Include directories
 target_include_directories(note-daemon PRIVATE
     include
+    include/module_framework
     src
     ${LIBUSB_INCLUDE_DIRS}
     ${Boost_INCLUDE_DIRS}
@@ -30,7 +48,12 @@ target_link_libraries(note-daemon PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
     pthread
+    dl
 )
+
+# Export all symbols so dynamically loaded modules can access them
+# This is needed for modules to call functions from the main executable
+set_target_properties(note-daemon PROPERTIES LINK_FLAGS "-rdynamic")
 
 # Compiler options
 target_compile_options(note-daemon PRIVATE
@@ -60,3 +83,6 @@ add_subdirectory(tests)
 
 # Add process-monitor subdirectory
 add_subdirectory(process-monitor)
+
+# Create module directory for installed modules
+install(DIRECTORY DESTINATION /etc/netnotes/modules)

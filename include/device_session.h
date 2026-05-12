@@ -15,7 +15,6 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
-#include <condition_variable>
 #include <functional>
 #include <unordered_map>
 
@@ -28,17 +27,15 @@ extern std::atomic<bool> g_running;
 #include "note_messaging.h"
 #include "notebytes.h"
 #include "notebytes_writer.h"
-#include "event_bytes.h"
 #include "encryption_protocol.h"
 #include "input_packet.h"
-
+ 
 using namespace State;
 using namespace Capabilities;
 
 #include "usb_device_descriptor.h"
 #include "device_streaming_thread.h"
 #include "hid_device_streaming_thread.h"
-#include "device_registry.h"
 
 /**
  * Device Session - manages protocol and routing
@@ -312,25 +309,25 @@ private:
     // ===== HANDLER INITIALIZATION =====
     
     void initialize_control_handlers() {
-        control_handlers_[EventBytes::TYPE_CMD] = [this](const NoteBytes::Object& msg) {
+        control_handlers_[NoteMessaging::Keys::CMD] = [this](const NoteBytes::Object& msg) {
             this->handle_command(msg);
         };
         
-        control_handlers_[EventBytes::TYPE_HELLO] = [this](const NoteBytes::Object&) {
+        control_handlers_[NoteMessaging::ProtocolMessages::HELLO] = [this](const NoteBytes::Object&) {
             this->send_accept("READY");
         };
         
-        control_handlers_[EventBytes::TYPE_PING] = [this](const NoteBytes::Object&) {
+        control_handlers_[NoteMessaging::ProtocolMessages::PING] = [this](const NoteBytes::Object&) {
             this->send_pong();
         };
         
-        control_handlers_[EventBytes::EVENT_RELEASE] = [this](const NoteBytes::Object&) {
+        control_handlers_[NoteMessaging::ProtocolMessages::RELEASE] = [this](const NoteBytes::Object&) {
             syslog(LOG_INFO, "Client requested disconnect");
             send_accept("Goodbye");
             throw std::runtime_error("Client disconnect");
         };
         
-        control_handlers_[EventBytes::TYPE_SHUTDOWN] = [this](const NoteBytes::Object&) {
+        control_handlers_[NoteMessaging::ProtocolMessages::SHUTDOWN] = [this](const NoteBytes::Object&) {
             syslog(LOG_INFO, "Client requested shutdown");
             send_accept("Goodbye");
             throw std::runtime_error("Client disconnect");
@@ -339,18 +336,18 @@ private:
     
     void initialize_routed_handlers() {
         // Encryption negotiation
-        routed_handlers_[EventBytes::TYPE_ENCRYPTION_ACCEPT] = [this](const NoteBytes::Object& msg) {
+        routed_handlers_[NoteMessaging::ProtocolMessages::ENCRYPTION_ACCEPT] = [this](const NoteBytes::Object& msg) {
             std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, NoteMessaging::Keys::EMPTY);
             this->handle_device_encryption_accept(device_id, msg);
         };
         
-        routed_handlers_[EventBytes::TYPE_ENCRYPTION_DECLINE] = [this](const NoteBytes::Object& msg) {
+        routed_handlers_[NoteMessaging::ProtocolMessages::ENCRYPTION_DECLINE] = [this](const NoteBytes::Object& msg) {
             std::string device_id = msg.get_string(NoteMessaging::Keys::DEVICE_ID, NoteMessaging::Keys::EMPTY);
             this->handle_device_encryption_decline(device_id);
         };
         
         // Handle routed TYPE_CMD messages from client
-        routed_handlers_[EventBytes::TYPE_CMD] = [this](const NoteBytes::Object& msg) {
+        routed_handlers_[NoteMessaging::Keys::CMD] = [this](const NoteBytes::Object& msg) {
             this->handle_routed_command(msg);
         };
     }
@@ -601,7 +598,7 @@ private:
     
     void send_device_list() {
         NoteBytes::Object response;
-        response.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_CMD);
+        response.add(NoteMessaging::Keys::EVENT, NoteMessaging::Keys::CMD);
         response.add(NoteMessaging::Keys::CMD, NoteMessaging::ProtocolMessages::ITEM_LIST);
         
         NoteBytes::Array devices_array;
@@ -634,7 +631,7 @@ private:
     
     void send_accept(const std::string& status = "ok") {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ACCEPT);
+        msg.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::ACCEPT);
         msg.add(NoteMessaging::Keys::STATUS, status);
         
         send_message(msg);
@@ -648,7 +645,7 @@ private:
         const std::string& correlation_id = "") {
         NoteBytes::Object msg;
         msg.add(NoteMessaging::Keys::EVENT, event);
-        msg.add(NoteMessaging::Keys::ERROR_CODE, code);
+        msg.add(NoteMessaging::Keys::ERROR, code);
         msg.add(NoteMessaging::Keys::MSG, message);
         msg.add(NoteMessaging::Keys::DEVICE_ID, device_id);
         if (!correlation_id.empty()) {
@@ -663,8 +660,8 @@ private:
     
     void send_error(int code, const std::string& message, const std::string& correlation_id = "") {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_ERROR);
-        msg.add(NoteMessaging::Keys::ERROR_CODE, code);
+        msg.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::ERROR);
+        msg.add(NoteMessaging::Keys::ERROR, code);
         msg.add(NoteMessaging::Keys::MSG, message);
         if (!correlation_id.empty()) {
             msg.add(NoteMessaging::Keys::CORRELATION_ID, correlation_id);
@@ -677,7 +674,7 @@ private:
     
     void send_pong() {
         NoteBytes::Object msg;
-        msg.add(NoteMessaging::Keys::EVENT, EventBytes::TYPE_PONG);
+        msg.add(NoteMessaging::Keys::EVENT, NoteMessaging::ProtocolMessages::PONG);
         
         send_message(msg);
     }
@@ -901,7 +898,7 @@ private:
         // Check if device exists and is available
         auto device_it = available_devices.find(device_id);
         if (device_it == available_devices.end()) {
-            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
+            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
                       "Device not found: " + device_id,
                       correlation_id);
             return;
@@ -934,7 +931,7 @@ private:
 
         if (!usb_device) {
             libusb_free_device_list(device_list, 1);
-            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
+            send_error(NoteMessaging::ProtocolMessages::ITEM_CLAIMED, device_id, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
                       "USB device not found: " + device_id,
                       correlation_id);
             return;
@@ -1028,7 +1025,7 @@ private:
         // Check if device is claimed by this client
         auto state_it = device_states.find(device_id);
         if (state_it == device_states.end()) {
-            send_error(NoteMessaging::ProtocolMessages::ITEM_RELEASED, device_id, NoteMessaging::ErrorCodes::ITEM_NOT_FOUND,
+            send_error(NoteMessaging::ProtocolMessages::ITEM_RELEASED, device_id, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
                       "Device not claimed: " + device_id,
                       correlation_id);
             return;

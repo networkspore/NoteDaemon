@@ -22,13 +22,25 @@ namespace NoteMessaging {
         inline const NoteBytes::Value PONG("pong");
         inline const NoteBytes::Value SHUTDOWN("shutdown");
         inline const NoteBytes::Value DISCONNECTED("disconnected");
-        
+        inline const NoteBytes::Value CMD("cmd");
         // Discovery Phase
         inline const NoteBytes::Value REQUEST_DISCOVERY("request_discovery");
+        inline const NoteBytes::Value GET_MODULES("get_modules");
+        inline const NoteBytes::Value MODULE_LIST("module_list");
         inline const NoteBytes::Value ITEM_LIST("item_list");
         inline const NoteBytes::Value GET_ITEM_INFO("get_item_info");
         inline const NoteBytes::Value ITEM_INFO("item_info");
         inline const NoteBytes::Value GET_CAPABILITIES("get_capabilities");
+
+
+
+        // ===== STATE CHANGE EVENTS =====
+        inline const NoteBytes::Value RELEASE("release");
+        inline const NoteBytes::Value REMOVED("removed");
+        inline const NoteBytes::Value CHANGED("changed");
+        inline const NoteBytes::Value CHECKED("checked");
+        inline const NoteBytes::Value ADDED("added");
+     
         
         // Claim Phase
         inline const NoteBytes::Value CLAIM_ITEM("claim_item");
@@ -57,7 +69,12 @@ namespace NoteMessaging {
         inline const NoteBytes::Value ENABLE_ENCRYPTION("enable_encryption");
         inline const NoteBytes::Value DISABLE_ENCRYPTION("disable_encryption");
         inline const NoteBytes::Value ENCRYPTION_READY("encryption_ready");
-        
+        inline const NoteBytes::Value KEY("key");
+        inline const NoteBytes::Value ENCRYPTION_OFFER("encryption_offer");
+        inline const NoteBytes::Value ENCRYPTION_ACCEPT("encryption_accept");
+        inline const NoteBytes::Value ENCRYPTED("encrypted");
+        inline const NoteBytes::Value ENCRYPTION_DECLINE("encryption_decline");
+
         // Status Messages
         inline const NoteBytes::Value ERROR("error");
         inline const NoteBytes::Value SUCCESS("success");
@@ -83,6 +100,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value EMPTY("");
         inline const NoteBytes::Value UUID_128("uuid_128");
         inline const NoteBytes::Value DEVICE_ID("device_id");
+        inline const NoteBytes::Value MODULE_ID("module_id");
         inline const NoteBytes::Value ID("id");
         inline const NoteBytes::Value EVENT("event");
         inline const NoteBytes::Value CONTROL("control");
@@ -95,8 +113,20 @@ namespace NoteMessaging {
         inline const NoteBytes::Value CURRENT_MODE("current_mode");
         inline const NoteBytes::Value STATE_TYPE("state_type");
         inline const NoteBytes::Value IV("iv");
+        inline const NoteBytes::Value VENDOR_ID("vendor_id");
+        inline const NoteBytes::Value PRODUCT_ID("product_id");
         inline const NoteBytes::Value CORRELATION_ID("correlationId");
         
+    
+        inline const NoteBytes::Value CMD("cmd");
+        inline const NoteBytes::Value ERROR("error");
+
+        // ===== MODULE DISCOVERY =====
+
+        inline const NoteBytes::Value DESCRIPTION("description");
+        inline const NoteBytes::Value CAPABILITIES("capabilities");
+        inline const NoteBytes::Value HANDLERS("handlers");
+
         // Metadata
         inline const NoteBytes::Value NAME("name");
         inline const NoteBytes::Value TIMESTAMP("time_stamp");
@@ -105,11 +135,9 @@ namespace NoteMessaging {
         // Payload
         inline const NoteBytes::Value PAYLOAD("payload");
         inline const NoteBytes::Value STATE_FLAGS("state_flags");
-        inline const NoteBytes::Value CMD("cmd");
         
         // Status & Results
         inline const NoteBytes::Value STATUS("status");
-        inline const NoteBytes::Value ERROR_CODE("error");
         inline const NoteBytes::Value MSG("msg");
         inline const NoteBytes::Value RESULT("result");
         inline const NoteBytes::Value WARNING("warning");
@@ -127,8 +155,6 @@ namespace NoteMessaging {
         inline const NoteBytes::Value ITEM_PROTOCOL("item_protocol");
         inline const NoteBytes::Value ITEM_ADDRESS("item_address");
         
-        inline const NoteBytes::Value VENDOR_ID("vendor_id");
-        inline const NoteBytes::Value PRODUCT_ID("product_id");
         inline const NoteBytes::Value BUS_NUMBER("bus_number");
         inline const NoteBytes::Value MANUFACTURER("manufacturer");
         inline const NoteBytes::Value PRODUCT("product");
@@ -210,7 +236,8 @@ namespace NoteMessaging {
     }
 
     // =============================================================================
-    // ERROR CODES - Standardized error codes (keep as integers)
+    // ERROR CODES - Standardized error codes
+    // These are the standard codes used throughout the C++ implementation
     // =============================================================================
     namespace ErrorCodes {
         // General errors (0-9)
@@ -220,23 +247,28 @@ namespace NoteMessaging {
         constexpr int TIMEOUT               = 3;
         constexpr int INTERRUPTED           = 4;
         
-        // Resource errors (10-19)
-        constexpr int ITEM_NOT_FOUND        = 10;
-        constexpr int ITEM_NOT_AVAILABLE    = 11;
+        // Device acquisition errors (10-19)
+        constexpr int DEVICE_NOT_FOUND      = 10;   // Device doesn't exist
+        constexpr int ITEM_NOT_AVAILABLE    = 11;   // Device already claimed
         constexpr int MODE_INCOMPATIBLE     = 12;
         constexpr int MODE_NOT_SUPPORTED    = 13;
         constexpr int FEATURE_NOT_SUPPORTED = 14;
         constexpr int CLAIM_FAILED          = 15;
+        constexpr int ALREADY_RELEASED      = 16;   // Device was already released
         
         // Permission errors (20-29)
-        constexpr int PERMISSION_DENIED     = 20;
+        constexpr int PERMISSION_DENIED     = 20;   // Cannot open device / permission issue
         constexpr int UNAUTHORIZED          = 21;
         constexpr int PID_MISMATCH          = 22;
-        constexpr int ALREADY_CLAIMED       = 23;
+        constexpr int ALREADY_CLAIMED       = 23;   // Device already claimed by this client
+        
+        // Ownership errors (24-29)
+        // NOT_OWNER: Device claimed by different client
+        constexpr int NOT_OWNER             = 24;   // Not the owner of the device
         
         // State errors (30-39)
         constexpr int INVALID_STATE         = 30;
-        constexpr int NOT_CLAIMED           = 31;
+        constexpr int NOT_CLAIMED           = 31;   // Device not claimed
         constexpr int NOT_STREAMING         = 32;
         constexpr int ALREADY_STREAMING     = 33;
         
@@ -285,7 +317,7 @@ namespace NoteMessaging {
             {ErrorCodes::UNKNOWN, "Unknown error"},
             {ErrorCodes::PARSE_ERROR, "Parse error"},
             {ErrorCodes::INVALID_MESSAGE, "Invalid message"},
-            {ErrorCodes::ITEM_NOT_FOUND, "Item not found"},
+            {ErrorCodes::DEVICE_NOT_FOUND, "Item not found"},
             {ErrorCodes::ITEM_NOT_AVAILABLE, "Item not available"},
             {ErrorCodes::MODE_INCOMPATIBLE, "Mode not compatible"},
             {ErrorCodes::MODE_NOT_SUPPORTED, "Mode not supported"},
