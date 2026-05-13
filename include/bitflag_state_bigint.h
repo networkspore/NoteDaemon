@@ -5,8 +5,6 @@
 #define BITFLAG_STATE_BIGINT_H
 
 #include <boost/multiprecision/cpp_int.hpp>
-#include <atomic>
-#include <condition_variable>
 #include <functional>
 #include <map>
 #include <mutex>
