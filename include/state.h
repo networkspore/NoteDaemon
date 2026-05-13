@@ -6,6 +6,7 @@
 
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/multiprecision/fwd.hpp>
+#include <atomic>
 #include "bitflag_state_bigint.h"
 #include "note_messaging.h"
 #include "notebytes.h"

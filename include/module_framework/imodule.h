@@ -1,5 +1,14 @@
 // include/module_framework/imodule.h
-// IModule interface - base interface for all loadable modules
+// IModule interface - base interface for all loadable modules.
+//
+// Changes from previous version:
+//   • set_ownership_registry() – core injects DeviceOwnershipRegistry pointer
+//     after construction so modules can register/unregister device ownership.
+//   • handle_management_message() – new entry point for management-socket
+//     commands (claim, release, discovery requests). Carries reply_fd so the
+//     module can write responses directly without shared state.
+//   • handle_client() is now exclusively called for DEVICE sockets (post-
+//     DEVICE_HANDSHAKE routing). Management messages no longer flow through it.
 
 #ifndef IMODULE_H
 #define IMODULE_H
@@ -9,6 +18,7 @@
 #include <vector>
 #include "error.h"
 #include "capability_registry.h"
+#include "device_ownership_registry.h"
 #include "json.hpp"  // nlohmann/json
 
 namespace NoteDaemon {
@@ -16,143 +26,143 @@ namespace NoteDaemon {
 class HandlerRegistry;
 
 /**
- * Base interface for all loadable modules
+ * Base interface for all loadable modules.
  */
 class IModule {
 public:
     virtual ~IModule() = default;
 
-    // ===== Identity =====
-    
-    /**
-     * Returns the module's unique identifier (e.g., "note_usb")
-     */
-    virtual std::string_view name() const = 0;
-    
-    /**
-     * Returns the module's version (e.g., "1.0.0")
-     */
-    virtual std::string_view version() const = 0;
-    
-    /**
-     * Returns a human-readable description of the module
-     */
+    // ── Identity ──────────────────────────────────────────────────────────────
+
+    /** Unique identifier, e.g. "note_usb". */
+    virtual std::string_view name()        const = 0;
+    /** Semver string, e.g. "1.0.0". */
+    virtual std::string_view version()     const = 0;
+    /** Human-readable description. */
     virtual std::string_view description() const = 0;
 
-    // ===== Lifecycle =====
-    
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
     /**
-     * Initialize the module with its configuration
-     * Called after module is loaded and before start()
-     * @param config Module-specific configuration (JSON object)
-     * @return Error::success() on success, error code on failure
+     * init() – called once after the module is loaded, before start().
+     * @param config Module-specific JSON configuration.
      */
     virtual Error init(const nlohmann::json& config) = 0;
-    
+
     /**
-     * Start the module - begin normal operation
-     * @return Error::success() on success, error code on failure
+     * Core injects the DeviceOwnershipRegistry immediately after init() returns
+     * successfully.  Modules that claim devices MUST store this pointer and call
+     * register_device() / unregister_device() on claim / release.
+     *
+     * Default implementation is a no-op so modules that don't claim devices
+     * don't need to override it.
      */
+    virtual void set_ownership_registry(DeviceOwnershipRegistry* /*registry*/) {}
+
+    /** Begin normal operation (start background threads, etc.). */
     virtual Error start() = 0;
-    
-    /**
-     * Stop the module - gracefully shut down
-     * Note: Device monitors may survive stop() - they run independently
-     * @return Error::success() on success, error code on failure
-     */
-    virtual Error stop() = 0;
-    
-    /**
-     * Full shutdown - release all resources
-     * Called during daemon shutdown
-     */
+
+    /** Graceful stop – background threads should exit but resources may remain. */
+    virtual Error stop()  = 0;
+
+    /** Full teardown – release all resources.  Called during daemon shutdown. */
     virtual void shutdown() = 0;
-    
-    // ===== Client Connection Handling =====
-    
+
+    // ── Two-socket connection handling ────────────────────────────────────────
+
     /**
-     * Handle a new client connection
-     * Called by core when a client connects.
-     * Module should create a session and start handling the connection.
-     * @param client_fd Client socket file descriptor
-     * @param client_pid Client process ID
-     * @return Error::success() on success, error code on failure
+     * handle_management_message() – process a single management-socket command.
+     *
+     * Called by the core's management read loop for messages that belong to this
+     * module (claim_item, release_item, request_discovery, …).  The module MUST
+     * write any response directly to reply_fd before returning.  The core does
+     * NOT read from reply_fd after this call.
+     *
+     * @param message    Fully-parsed NoteBytes object received on management socket.
+     * @param reply_fd   File descriptor of the management socket connection. Write
+     *                    NoteBytes-framed responses here.  Do NOT close it.
+     * @param client_pid Actual client PID from SO_PEERCRED - do NOT trust any pid
+     *                    field in the message, always use this actual credential.
+     * @return Error     SUCCESS or a descriptive error (logged by the core).
+     */
+    virtual Error handle_management_message(const NoteBytes::Object& message,
+                                            int reply_fd,
+                                            pid_t client_pid) {
+        (void)message; (void)reply_fd; (void)client_pid;
+        return Error::from_code(ErrorCodes::UNKNOWN,
+                                "handle_management_message not implemented");
+    }
+
+    /**
+     * handle_client() – called exclusively for DEVICE sockets.
+     *
+     * The core calls this after a DEVICE_HANDSHAKE has identified that this
+     * module owns the connecting device.  The module takes full ownership of
+     * client_fd (including closing it when the session ends).
+     *
+     * @param client_fd  Device socket fd. Module owns its full lifecycle.
+     * @param client_pid Client process ID (for logging / session keying).
      */
     virtual Error handle_client(int client_fd, pid_t client_pid) = 0;
-    
+
     /**
-     * Cleanup client session
-     * Called when client disconnects.
-     * @param client_pid Client process ID
+     * cleanup_client() – called when a client disconnects from a device socket.
+     * @param client_pid Client process ID used to look up the session.
      */
     virtual void cleanup_client(pid_t client_pid) = 0;
 
-    // ===== Health Check =====
-    
+    // ── Health ───────────────────────────────────────────────────────────────
+
     /**
-     * Check if module is healthy and compatible with core
-     * Called by core after loading the module
-     * @param core_api_version The core's API version string
-     * @return Error::success() if healthy, error code if not
+     * Verify the module is healthy and compatible with core_api_version.
+     * Called by the core after loading and before registering the module.
      */
     virtual Error check_health(const std::string& core_api_version) = 0;
 
-    // ===== Capabilities =====
-    
-    /**
-     * Returns the capabilities this module provides
-     * Uses bitflags (same system as existing capability_registry)
-     */
+    // ── Capabilities & routing ───────────────────────────────────────────────
+
+    /** Bitfield of capabilities this module provides. */
     virtual cpp_int capabilities() const = 0;
 
-    // ===== Message Types =====
-    
     /**
-     * Returns list of message types this module handles
-     * Used by core for Level 1 routing
-     * @return Vector of message type strings (e.g., "claim_item", "release_item")
+     * Message types this module handles on the management socket.
+     * Used by the core to build the ModuleRoutingRegistry after init().
+     * e.g. { "claim_item", "release_item", "request_discovery" }
      */
     virtual std::vector<std::string> get_handled_message_types() = 0;
 
-    // ===== Handler Registry =====
-    
+    // ── Handler registry (device-level internal routing) ──────────────────────
+
     /**
-     * Returns this module's handler registry
-     * Used by core for Level 2 (device-level) routing
-     * Core will pull handlers from this registry after init()
+     * Returns the module's internal HandlerRegistry.
+     * Used for in-module message_type → handler routing (not core-level routing).
      */
     virtual HandlerRegistry& get_handler_registry() = 0;
 
-    // ===== Error Collection =====
-    
-    /**
-     * Collect errors from this module (pull-based, thread-safe)
-     * @param errors Vector to append errors to
-     */
+    // ── Error collection ──────────────────────────────────────────────────────
+
+    /** Pull-based error collection.  Append module errors to @p errors. */
     virtual void collect_errors(std::vector<Error>& errors) = 0;
 
-    // ===== Cleanup =====
-    
-    /**
-     * Release all resources - called during cleanup
-     */
+    // ── Cleanup ───────────────────────────────────────────────────────────────
+
+    /** Release all device handles; called during module stop / shutdown. */
     virtual void cleanup() = 0;
 };
 
+// ── Factory ──────────────────────────────────────────────────────────────────
+
 /**
- * Module factory function signature
- * Modules export this symbol for dynamic loading
- * 
- * Example export in module:
- * extern "C" NoteDaemon::IModule* create_module() {
- *     return new MyModule();
- * }
+ * Every module .so exports a symbol with this signature for dynamic loading.
+ *
+ * Example:
+ *   extern "C" NoteDaemon::IModule* create_note_usb_module() {
+ *       static NoteUSBModule instance;
+ *       return &instance;
+ *   }
  */
 using ModuleFactory = IModule*(*)();
 
-/**
- * Get the module factory symbol name for a given module
- */
 inline std::string get_module_factory_symbol(const std::string& module_name) {
     return "create_" + module_name + "_module";
 }

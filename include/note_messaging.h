@@ -24,6 +24,12 @@ namespace NoteMessaging {
         inline const NoteBytes::Value DISCONNECTED("disconnected");
         inline const NoteBytes::Value CMD("cmd");
         // Discovery Phase
+        // Two-socket model
+        inline const NoteBytes::Value DEVICE_HANDSHAKE("device_handshake");
+        inline const NoteBytes::Value QUERY_DEVICES("query_devices");
+        inline const NoteBytes::Value QUERY_RESULT("query_result");
+
+        // Discovery Phase
         inline const NoteBytes::Value REQUEST_DISCOVERY("request_discovery");
         inline const NoteBytes::Value GET_MODULES("get_modules");
         inline const NoteBytes::Value MODULE_LIST("module_list");
@@ -107,6 +113,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value SEQUENCE("seq_id");
         inline const NoteBytes::Value SESSION_ID("session_id");
         inline const NoteBytes::Value PID("pid");
+        inline const NoteBytes::Value CLIENT_PID("client_pid");
         inline const NoteBytes::Value RECEIVER_ID("receiver_id");
         inline const NoteBytes::Value SENDER_ID("sender_id");
         inline const NoteBytes::Value CODE_KEY("code");

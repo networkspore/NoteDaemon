@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <unistd.h>
+#include <thread>
 
 class ErrorHandlingTest : public ::testing::Test {
 protected:

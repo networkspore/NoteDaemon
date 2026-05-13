@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <unistd.h>
+#include <thread>
 
 class DeviceSessionTest : public ::testing::Test {
 protected:
