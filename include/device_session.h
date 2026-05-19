@@ -27,8 +27,12 @@ extern std::atomic<bool> g_running;
 #include "note_messaging.h"
 #include "notebytes.h"
 #include "notebytes_writer.h"
-#include "encryption_protocol.h"
 #include "input_packet.h"
+
+// Encryption: IEncryptionProvider (modular, USB-specific impl)
+// and DHKeyExchange (for handshake, managed by session)
+#include "module_framework/encryption_api.h"
+#include "encryption.h"
  
 using namespace State;
 using namespace Capabilities;
@@ -60,8 +64,15 @@ private:
     std::map<std::string, std::unique_ptr<DeviceStreamingThread>> streaming_threads;
     std::map<std::string, std::shared_ptr<USBDeviceDescriptor>> available_devices;
     
-    // Per-device encryption - keyed by deviceId (string)
-    std::map<std::string, std::unique_ptr<EncryptionProtocol::EncryptionHandshake>> device_encryptions_;
+    // Per-device DH key exchange (managed by session for handshake)
+    std::map<std::string, std::unique_ptr<Encryption::DHKeyExchange>>
+        device_dh_keys_;
+
+    // Per-device encryption via the modular IEncryptionProvider
+    // (UsbEncryptionProvider when NoteUSB is loaded).
+    // We keep a weak pointer because the provider is the global
+    // singleton accessed via NoteDaemon::get_encryption_provider().
+    // The provider manages its own per-device state.
     
     // Handler maps - O(1) dispatch
     std::unordered_map<NoteBytes::Value, Handler> control_handlers_;
@@ -425,24 +436,25 @@ private:
     
     void handle_encrypted_routed_message(const std::string& device_id,
                                         const InputPacket::RoutedMessage& routed) {
-        auto enc_it = device_encryptions_.find(device_id);
-        if (enc_it == device_encryptions_.end() || !enc_it->second->is_active()) {
-            syslog(LOG_ERR, "Received encrypted message but no active encryption");
+        auto& enc = NoteDaemon::get_encryption_provider();
+        if (!enc.is_encrypted(device_id)) {
+            syslog(LOG_ERR, "Received encrypted message but no active "
+                             "encryption for device %s", device_id.c_str());
             return;
         }
-        
+
         std::vector<uint8_t> plaintext;
-        if (!enc_it->second->decrypt(routed.message.data(), plaintext)) {
+        if (!enc.decrypt(device_id, routed.message.data(), plaintext)) {
             syslog(LOG_ERR, "Decryption failed for device %s", device_id.c_str());
             return;
         }
-        
+
         NoteBytes::Object event_obj = NoteBytes::Object::deserialize(
             plaintext.data(), plaintext.size());
-        
+
         auto* event_value = event_obj.get(NoteMessaging::Keys::EVENT);
         if (event_value) {
-            syslog(LOG_DEBUG, "Received encrypted event type %s for device %s", 
+            syslog(LOG_DEBUG, "Received encrypted event type %s for device %s",
                    event_value->as_string().c_str(), device_id.c_str());
         }
     }
@@ -780,14 +792,17 @@ private:
             thread->stop();
         }
         streaming_threads.clear();
-        
-        device_encryptions_.clear();
-        
+
+        // Clean up DH key exchange contexts
+        device_dh_keys_.clear();
+
+        // Remove all devices from the encryption provider
         for (auto& [device_id, state] : device_states) {
+            NoteDaemon::get_encryption_provider().remove_device(device_id);
             state->release();
         }
         device_states.clear();
-        
+
         for (auto& [id, device] : available_devices) {
             if (device->handle) {
                 libusb_release_interface(device->handle, device->interface_number);
@@ -800,13 +815,21 @@ private:
             // Clean up registry entries for all devices in this session
             this->unregister_device(id);
         }
-        
+
         syslog(LOG_INFO, "Released all devices");
     }
     
+    /**
+     * Offer encryption to the client for a device.
+     * Starts DH key exchange and sends ENCRYPTION_OFFER.
+     */
     void offer_device_encryption(const std::string& device_id);
-    void send_device_encryption_error(const std::string& device_id, 
-                                      const std::string& reason);
+
+    /**
+     * Send an encryption error to the client.
+     */
+    void send_device_encryption_error(const std::string& device_id,
+                                    const std::string& reason);
 
     // ===== IMPLEMENTATIONS =====
 
@@ -1076,8 +1099,9 @@ private:
         // Remove from the crash-recovery registry
         this->unregister_device(device_id);
 
-        // Clear encryption
-        device_encryptions_.erase(device_id);
+        // Clean up encryption (DH key + symmetric)
+        device_dh_keys_.erase(device_id);
+        NoteDaemon::get_encryption_provider().remove_device(device_id);
 
         // Remove from device states
         device_state->release();
@@ -1095,18 +1119,84 @@ private:
         send_message(response);
     }
 
-    void handle_device_encryption_accept(const std::string& device_id, 
-                                        const NoteBytes::Object& msg) {
-        (void)msg; // Suppress unused parameter warning
-        // TODO: Implement encryption acceptance logic
-        syslog(LOG_INFO, "Encryption acceptance not yet implemented for device: %s", device_id.c_str());
-        // Should establish encrypted communication channel
+    void handle_device_encryption_accept(
+        const std::string& device_id,
+        const NoteBytes::Object& msg) {
+        auto& enc = NoteDaemon::get_encryption_provider();
+
+        // Extract the client's DH public key from the message
+        auto* key_value = msg.get(NoteMessaging::Keys::PUBLIC_KEY);
+        if (!key_value || key_value->type() != NoteBytes::Type::RAW_BYTES) {
+            syslog(LOG_ERR, "Encryption: missing or invalid public_key "
+                             "in ENCRYPTION_ACCEPT for device %s",
+                   device_id.c_str());
+            send_device_encryption_error(
+                device_id, "missing or invalid public_key");
+            return;
+        }
+
+        std::vector<uint8_t> client_public_key = key_value->data();
+        if (client_public_key.empty()) {
+            syslog(LOG_ERR, "Encryption: empty public key in "
+                             "ENCRYPTION_ACCEPT for device %s",
+                   device_id.c_str());
+            send_device_encryption_error(device_id,
+                                        "empty public_key");
+            return;
+        }
+
+        // Set the peer's public key on the DH key exchange
+        if (!enc.set_peer_public_key(device_id, client_public_key)) {
+            syslog(LOG_ERR,
+                   "Encryption: failed to set peer public key for "
+                   "device %s",
+                   device_id.c_str());
+            send_device_encryption_error(
+                device_id, "failed to set peer public key");
+            return;
+        }
+
+        // Finalize DH handshake: derive shared secret and init GCM
+        if (!enc.finalize(device_id)) {
+            syslog(LOG_ERR,
+                   "Encryption: DH handshake failed for device %s",
+                   device_id.c_str());
+            send_device_encryption_error(
+                device_id, "DH handshake failed");
+            return;
+        }
+
+        // Send ENCRYPTION_READY with the IV so the client can sync.
+        // The IV is obtained from the encryption provider (which
+        // manages the GCM session per device).
+        std::vector<uint8_t> iv =
+            NoteDaemon::get_encryption_provider().get_iv(device_id);
+
+        NoteBytes::Object ready_msg;
+        ready_msg.add(NoteMessaging::Keys::CONTROL,
+                      NoteMessaging::ProtocolMessages::ENCRYPTION_READY);
+        ready_msg.add(NoteMessaging::Keys::IV,
+                      NoteBytes::Value(iv.data(), iv.size(),
+                                       NoteBytes::Type::RAW_BYTES));
+        ready_msg.add(NoteMessaging::Keys::STATUS,
+                      NoteMessaging::Status::ACTIVE);
+
+        send_routed_control_message(device_id, ready_msg);
+
+        syslog(LOG_INFO,
+               "Encryption active for device: %s",
+               device_id.c_str());
     }
 
-    void handle_device_encryption_decline(const std::string& device_id) {
-        // TODO: Implement encryption decline logic
-        syslog(LOG_INFO, "Encryption decline not yet implemented for device: %s", device_id.c_str());
-        // Should handle failed encryption negotiation
+    void handle_device_encryption_decline(
+        const std::string& device_id) {
+        // Clean up the DH context (encryption not needed)
+        device_dh_keys_.erase(device_id);
+        NoteDaemon::get_encryption_provider().remove_device(device_id);
+
+        syslog(LOG_INFO,
+               "Encryption declined for device: %s",
+               device_id.c_str());
     }
 };
 

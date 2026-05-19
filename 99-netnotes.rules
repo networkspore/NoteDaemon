@@ -1,9 +1,17 @@
 # /etc/udev/rules.d/99-netnotes.rules
 
-SUBSYSTEM=="usb", KERNEL=="usb[0-9]*", MODE="0660", GROUP="root"
+# USB device nodes (what libusb actually opens)
+# To scope the rule further to only a specific device, add:
+# ATTRS{idVendor}=="xxxx", ATTRS{idProduct}=="yyyy"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0660", GROUP="netnotes"
 
-# Raw HID devices for netnotes user (your actual devices)
+# USB interface nodes (not strictly needed for libusb, but consistent)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", MODE="0660", GROUP="netnotes"
+
+# Raw HID devices
 SUBSYSTEM=="hidraw", GROUP="netnotes", MODE="0660"
+
+
 
 # Notes / Installation
 # 1. Create a dedicated system group and user for the daemon (if not present):
@@ -23,6 +31,5 @@ SUBSYSTEM=="hidraw", GROUP="netnotes", MODE="0660"
 #    to the specific device nodes via the group.
 
 # 5. Verify permissions:
-#    ls -l /dev/bus/usb/*/*
 #    ls -l /dev/hidraw*
 #    # Device nodes should be group-owned by 'netnotes' and mode 0660

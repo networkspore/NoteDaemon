@@ -8,6 +8,9 @@ User=netnotes
 Group=netnotes
 RuntimeDirectory=netnotes
 RuntimeDirectoryMode=0750
+StateDirectory=netnotes
+StateDirectoryMode=0750
+Environment=NETNOTES_ROOT=/var/lib/netnotes
 
 ExecStart=/usr/local/bin/note-daemon
 Restart=no

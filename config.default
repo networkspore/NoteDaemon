@@ -1,0 +1,27 @@
+# System-wide NoteDaemon configuration
+# Used when running as note-daemon.service
+
+# Root for Netnotes system paths (logs, runtime, registries, etc.)
+# Must be writable by the service user (`netnotes`).
+# Modules directory is NOT configured here; it is statically derived
+# from the binary location: <binary_dir>/modules
+root.path=/var/lib/netnotes
+
+# Socket (must match a directory that the daemon user can write to)
+socket.path=/run/netnotes/notedaemon.sock
+socket.dir=/run/netnotes
+socket.group=netnotes
+# Decimal mode value (432 decimal = 0660 octal)
+socket.permissions=432
+
+# Logging (journal via systemd; stderr for local debugging)
+log.level=info
+log.stderr=false
+
+# USB / discovery
+usb.timeout_ms=100
+usb.discovery_interval_ms=1000
+usb.auto_detach_kernel=true
+
+# Security
+security.require_group=false

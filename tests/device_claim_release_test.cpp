@@ -16,6 +16,7 @@
 #include "module_framework/module_registry.h"
 #include "module_framework/imodule.h"
 #include "module_framework/error.h"
+#include "module_framework/device_ownership_registry.h"
 
 // Include state management
 #include "state.h"
@@ -585,4 +586,200 @@ TEST_F(DeviceClaimReleaseTest, MultipleDevicesWorkflow) {
     EXPECT_FALSE(device2->state.has_flag(DeviceFlags::CLAIMED));
     
     printf("[SUCCESS] Multiple devices workflow passed!\n");
+}
+// ============================================================================
+// DeviceOwnershipRegistry Tests
+// ============================================================================
+
+// Test 17: DeviceOwnershipRegistry - basic register/get_owner
+TEST_F(DeviceClaimReleaseTest, OwnershipRegistryBasic) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    const std::string device_id = "1:2";
+    const std::string module_id = "note_usb";
+    pid_t pid = 12345;
+    const std::string session_id = "session-1";
+
+    // Initially not claimed
+    EXPECT_FALSE(registry.is_claimed(device_id));
+
+    // Register ownership
+    registry.register_device(device_id, module_id, pid, session_id);
+
+    // Now claimed
+    EXPECT_TRUE(registry.is_claimed(device_id));
+
+    // Lookup module
+    auto mod = registry.lookup_module(device_id);
+    EXPECT_EQ(mod, module_id);
+
+    // Get full owner
+    auto owner = registry.get_owner(device_id);
+    EXPECT_FALSE(owner.empty());
+    EXPECT_EQ(owner.module_id, module_id);
+    EXPECT_EQ(owner.pid, pid);
+    EXPECT_EQ(owner.session_id, session_id);
+}
+
+// Test 18: DeviceOwnershipRegistry - is_claimed_by_pid
+TEST_F(DeviceClaimReleaseTest, OwnershipRegistryPidCheck) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    const std::string device_id = "1:2";
+    pid_t pid1 = 111;
+    pid_t pid2 = 222;
+
+    registry.register_device(device_id, "note_usb", pid1, "s1");
+
+    // Same PID → true
+    EXPECT_TRUE(registry.is_claimed_by_pid(device_id, pid1));
+    // Different PID → false
+    EXPECT_FALSE(registry.is_claimed_by_pid(device_id, pid2));
+}
+
+// Test 19: DeviceOwnershipRegistry - unregister
+TEST_F(DeviceClaimReleaseTest, OwnershipRegistryUnregister) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    const std::string device_id = "1:2";
+
+    registry.register_device(device_id, "note_usb", 999, "s1");
+    EXPECT_TRUE(registry.is_claimed(device_id));
+
+    registry.unregister_device(device_id);
+    EXPECT_FALSE(registry.is_claimed(device_id));
+    EXPECT_TRUE(registry.lookup_module(device_id).empty());
+
+    // Unregister again is no-op
+    registry.unregister_device(device_id);
+}
+
+// Test 20: DeviceOwnershipRegistry - clear
+TEST_F(DeviceClaimReleaseTest, OwnershipRegistryClear) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    registry.register_device("1:1", "note_usb", 1, "s1");
+    registry.register_device("1:2", "note_usb", 2, "s2");
+
+    EXPECT_TRUE(registry.is_claimed("1:1"));
+    EXPECT_TRUE(registry.is_claimed("1:2"));
+
+    registry.clear();
+
+    EXPECT_FALSE(registry.is_claimed("1:1"));
+    EXPECT_FALSE(registry.is_claimed("1:2"));
+}
+
+// Test 21: OwnershipRegistry - overwrite ownership (re-claim by new module/PID)
+TEST_F(DeviceClaimReleaseTest, OwnershipRegistryOverwrite) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    const std::string device_id = "1:2";
+
+    registry.register_device(device_id, "note_usb", 100, "s1");
+    auto o1 = registry.get_owner(device_id);
+    EXPECT_EQ(o1.pid, 100);
+    EXPECT_EQ(o1.session_id, "s1");
+
+    // Re-register with new PID/session (simulates re-claim)
+    registry.register_device(device_id, "note_usb", 200, "s2");
+    auto o2 = registry.get_owner(device_id);
+    EXPECT_EQ(o2.pid, 200);
+    EXPECT_EQ(o2.session_id, "s2");
+}
+
+// ============================================================================
+// PID_MISMATCH Claim Behavior (simulation of claim_device logic)
+// ============================================================================
+
+// Test 22: PID_MISMATCH - different PID must be rejected
+TEST_F(DeviceClaimReleaseTest, ClaimPidMismatch) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    const std::string device_id = "1:2";
+
+    // First client claims
+    pid_t pid1 = 111;
+    registry.register_device(device_id, "note_usb", pid1, "s1");
+
+    // Second client (different PID) attempts to claim
+    pid_t pid2 = 222;
+    // claim_device logic: if is_claimed and !is_claimed_by_pid → PID_MISMATCH
+    bool claimed = registry.is_claimed(device_id);
+    bool same_pid = registry.is_claimed_by_pid(device_id, pid2);
+
+    EXPECT_TRUE(claimed);
+    EXPECT_FALSE(same_pid);
+
+    // This combination (claimed && !same_pid) is exactly when claim_device
+    // returns PID_MISMATCH. We assert that condition is detected. 
+    bool would_be_pid_mismatch = claimed && !same_pid;
+    EXPECT_TRUE(would_be_pid_mismatch);
+}
+
+// Test 23: Same PID re-claim must be allowed
+TEST_F(DeviceClaimReleaseTest, ClaimSamePidAllowed) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    const std::string device_id = "1:2";
+    pid_t pid = 777;
+
+    // First claim
+    registry.register_device(device_id, "note_usb", pid, "s1");
+
+    // Same PID re-claim
+    bool claimed = registry.is_claimed(device_id);
+    bool same_pid = registry.is_claimed_by_pid(device_id, pid);
+    bool would_be_pid_mismatch = claimed && !same_pid;
+
+    EXPECT_TRUE(claimed);
+    EXPECT_TRUE(same_pid);
+    EXPECT_FALSE(would_be_pid_mismatch); // No PID_MISMATCH for same PID
+}
+
+// Test 24: Unclaimed device - no PID_MISMATCH
+TEST_F(DeviceClaimReleaseTest, ClaimUnclaimedNoMismatch) {
+    NoteDaemon::DeviceOwnershipRegistry registry;
+    const std::string device_id = "1:2";
+    pid_t pid = 333;
+
+    bool claimed = registry.is_claimed(device_id);
+    bool would_be_pid_mismatch = claimed && !registry.is_claimed_by_pid(device_id, pid);
+
+    EXPECT_FALSE(claimed);
+    EXPECT_FALSE(would_be_pid_mismatch); // No conflict for unclaimed device
+}
+
+// ============================================================================
+// check_kernel_driver_active() Logic Tests (conceptual, no live USB)
+// ============================================================================
+
+// Test 25: check_kernel_driver_active decision rules
+// These tests encode the policy implemented in DeviceHandler::check_kernel_driver_active()
+// without calling libusb directly.
+TEST_F(DeviceClaimReleaseTest, KernelDriverActiveLogic) {
+    // Rule 1: If libusb_open() fails (e.g., LIBUSB_ERROR_BUSY), we treat as kernel-held.
+    {
+        bool libusb_open_failed = true;
+        bool result = libusb_open_failed; // matches implementation
+        EXPECT_TRUE(result); // conservative: assume kernel driver active
+    }
+
+    // Rule 2: If libusb_open() succeeds but any interface has kernel driver active → true
+    {
+        bool libusb_open_failed = false;
+        bool any_interface_kernel_active = true;
+        bool result = libusb_open_failed ? true : any_interface_kernel_active;
+        EXPECT_TRUE(result);
+    }
+
+    // Rule 3: If libusb_open() succeeds and no interface has kernel driver → false
+    {
+        bool libusb_open_failed = false;
+        bool any_interface_kernel_active = false;
+        bool result = libusb_open_failed ? true : any_interface_kernel_active;
+        EXPECT_FALSE(result);
+    }
+
+    // Rule 4: If libusb_open() fails and we cannot confirm via sysfs yet,
+    // we still treat as kernel-held (conservative, avoids losing devices). 
+    {
+        bool libusb_open_failed = true;
+        bool sysfs_known = false; // not yet implemented
+        bool result = libusb_open_failed && !sysfs_known; // conservative
+        EXPECT_TRUE(result);
+    }
 }

@@ -156,10 +156,13 @@ public:
  * Every module .so exports a symbol with this signature for dynamic loading.
  *
  * Example:
- *   extern "C" NoteDaemon::IModule* create_note_usb_module() {
- *       static NoteUSBModule instance;
+ *   extern "C" NoteDaemon::IModule* create_example_module() {
+ *       static ExampleModule instance;
  *       return &instance;
  *   }
+ *
+ * Note: concrete modules (such as NoteUSB) may live in separate projects
+ * and are loaded through this shared symbol contract.
  */
 using ModuleFactory = IModule*(*)();
 

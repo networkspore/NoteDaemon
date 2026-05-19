@@ -12,7 +12,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <memory>
 #include <functional>
 #include <boost/multiprecision/cpp_int.hpp>
 
@@ -52,6 +51,10 @@ namespace NoteBytes {
     }
 
     constexpr size_t METADATA_SIZE = 5;  // 1 byte type + 4 bytes length
+
+    // Forward declarations
+    class Object;
+    class Array;
 
     /**
     * Base NoteBytes class - represents a typed byte array
@@ -212,7 +215,7 @@ namespace NoteBytes {
         bool as_bool() const {
             return !data_.empty() && data_[0] != 0;
         }
-        
+
         double as_double() const {
             if (data_.size() < 8) return 0.0;
             uint64_t bits = 0;
@@ -616,6 +619,39 @@ namespace NoteBytes {
             return Value(data, Type::ARRAY);
         }
     };
+
+    // ── Value helpers for compound types ──────────────────────────────────
+
+    /**
+     * Interpret this Value as an Object.
+     * Only valid if type() == Type::OBJECT.
+     */
+    inline Object as_object(const Value& v) {
+        if (v.type() != Type::OBJECT || v.data().size() < METADATA_SIZE) {
+            throw std::runtime_error("Value is not a valid OBJECT");
+        }
+        return Object::deserialize_from_packet(v.data().data());
+    }
+
+    /**
+     * Interpret this Value as an Array.
+     * Only valid if type() == Type::ARRAY.
+     */
+    inline Array as_array(const Value& v) {
+        if (v.type() != Type::ARRAY || v.data().size() < METADATA_SIZE) {
+            throw std::runtime_error("Value is not a valid ARRAY");
+        }
+        uint32_t len = (v.data()[1] << 24) | (v.data()[2] << 16) |
+                       (v.data()[3] << 8) | v.data()[4];
+        const uint8_t* body = v.data().data() + METADATA_SIZE;
+        Array arr;
+        size_t offset = 0;
+        while (offset < len) {
+            Value val = Value::read_from(body, offset);
+            arr.add(val);
+        }
+        return arr;
+    }
 
 } // namespace NoteBytes
 

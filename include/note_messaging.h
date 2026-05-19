@@ -33,6 +33,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value REQUEST_DISCOVERY("request_discovery");
         inline const NoteBytes::Value GET_MODULES("get_modules");
         inline const NoteBytes::Value MODULE_LIST("module_list");
+        inline const NoteBytes::Value TEST_MESSAGE("test_message");
         inline const NoteBytes::Value ITEM_LIST("item_list");
         inline const NoteBytes::Value GET_ITEM_INFO("get_item_info");
         inline const NoteBytes::Value ITEM_INFO("item_info");
@@ -114,6 +115,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value SESSION_ID("session_id");
         inline const NoteBytes::Value PID("pid");
         inline const NoteBytes::Value CLIENT_PID("client_pid");
+        inline const NoteBytes::Value CLIENT_SESSION_ID("client_session_id");
         inline const NoteBytes::Value RECEIVER_ID("receiver_id");
         inline const NoteBytes::Value SENDER_ID("sender_id");
         inline const NoteBytes::Value CODE_KEY("code");
@@ -163,6 +165,12 @@ namespace NoteMessaging {
         inline const NoteBytes::Value ITEM_ADDRESS("item_address");
         
         inline const NoteBytes::Value BUS_NUMBER("bus_number");
+        inline const NoteBytes::Value DEVICE_TYPE("device_type");
+        inline const NoteBytes::Value CLAIMED("claimed");
+        inline const NoteBytes::Value SCAN_LEVEL_MIN("scan_level_min");
+        inline const NoteBytes::Value REQUIRED_CAPABILITIES("required_capabilities");
+        inline const NoteBytes::Value FILTER("filter");
+        inline const NoteBytes::Value MODULE_FILTER("module_filter");
         inline const NoteBytes::Value MANUFACTURER("manufacturer");
         inline const NoteBytes::Value PRODUCT("product");
         inline const NoteBytes::Value SERIAL_NUMBER("serial_number");

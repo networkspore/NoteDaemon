@@ -132,6 +132,9 @@ public:
     bool heartbeat_enabled = true;
     int heartbeat_interval_ms = 5000;
     int heartbeat_timeout_ms = 15000;
+
+    // Security
+    bool security_require_group = true;
     
     /**
      * Get config value as string

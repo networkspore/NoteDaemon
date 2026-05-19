@@ -25,6 +25,8 @@ set(CORE_SOURCES
     src/core/error_collector.cpp
     src/core/config_manager.cpp
     src/core/encryption_api.cpp
+    src/core/usb_encryption_provider.cpp
+    src/core/path_resolver.cpp
 )
 
 # Combine all sources
@@ -49,11 +51,12 @@ target_link_libraries(note-daemon PRIVATE
     OpenSSL::Crypto
     pthread
     dl
+    stdc++fs
 )
 
 # Export all symbols so dynamically loaded modules can access them
 # This is needed for modules to call functions from the main executable
-set_target_properties(note-daemon PROPERTIES LINK_FLAGS "-rdynamic")
+target_link_options(note-daemon PRIVATE -rdynamic)
 
 # Compiler options
 target_compile_options(note-daemon PRIVATE

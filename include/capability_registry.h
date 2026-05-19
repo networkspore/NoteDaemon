@@ -116,10 +116,10 @@ namespace Names {
             case Bits::TOUCHPAD: return "touchpad";
             case Bits::SCROLL: return "scroll";
             
-            case Bits::RAW_MODE: return "raw";
-            case Bits::PARSED_MODE: return "parsed";
-            case Bits::PASSTHROUGH_MODE: return "passthrough";
-            case Bits::FILTERED_MODE: return "filtered";
+            case Bits::RAW_MODE: return "raw_mode";
+            case Bits::PARSED_MODE: return "parsed_mode";
+            case Bits::PASSTHROUGH_MODE: return "passthrough_mode";
+            case Bits::FILTERED_MODE: return "filtered_mode";
             
             case Bits::ABSOLUTE_COORDINATES: return "absolute_coordinates";
             case Bits::RELATIVE_COORDINATES: return "relative_coordinates";
@@ -158,10 +158,10 @@ namespace Names {
             {"pen", Bits::PEN},
             {"scroll", Bits::SCROLL},
             
-            {"raw", Bits::RAW_MODE},
-            {"parsed", Bits::PARSED_MODE},
-            {"passthrough", Bits::PASSTHROUGH_MODE},
-            {"filtered", Bits::FILTERED_MODE},
+            {"raw_mode", Bits::RAW_MODE},
+            {"parsed_mode", Bits::PARSED_MODE},
+            {"passthrough_mode", Bits::PASSTHROUGH_MODE},
+            {"filtered_mode", Bits::FILTERED_MODE},
             
             {"absolute_coordinates", Bits::ABSOLUTE_COORDINATES},
             {"relative_coordinates", Bits::RELATIVE_COORDINATES},
@@ -281,12 +281,12 @@ namespace Validation {
     inline bool validate_mode_compatibility(const std::string& device_type, 
                                            const std::string& requested_mode) {
         // Raw mode works with everything
-        if (requested_mode == "raw") {
+        if (requested_mode == "raw_mode") {
             return true;
         }
         
         // Parsed mode requires known device type
-        if (requested_mode == "parsed") {
+        if (requested_mode == "parsed_mode") {
             return device_type != "unknown";
         }
         

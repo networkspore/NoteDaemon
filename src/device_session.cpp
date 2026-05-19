@@ -102,3 +102,70 @@ void DeviceSession::register_claimed_device(const std::string& device_id,
 void DeviceSession::unregister_device(const std::string& device_id) {
     DeviceRegistry::remove_device(getpid(), device_id);  // Use daemon's PID
 }
+
+/**
+ * Offer encryption to the client for a device.
+ * Starts DH key exchange and sends ENCRYPTION_OFFER.
+ */
+void DeviceSession::offer_device_encryption(
+    const std::string& device_id) {
+    auto& enc = NoteDaemon::get_encryption_provider();
+
+    // Start DH key exchange (via the USB provider)
+    if (!enc.start_negotiation(device_id)) {
+        syslog(LOG_ERR,
+               "Failed to start DH negotiation for device %s",
+               device_id.c_str());
+        send_device_encryption_error(
+            device_id, "DH key exchange init failed");
+        return;
+    }
+
+    // Get our DH public key
+    auto public_key = enc.get_public_key(device_id);
+    if (public_key.empty()) {
+        syslog(LOG_ERR,
+               "Failed to get DH public key for device %s",
+               device_id.c_str());
+        send_device_encryption_error(
+            device_id, "failed to generate DH key");
+        return;
+    }
+
+    // Build and send ENCRYPTION_OFFER
+    NoteBytes::Object offer;
+    offer.add(NoteMessaging::Keys::CONTROL,
+              NoteMessaging::ProtocolMessages::ENCRYPTION_OFFER);
+    offer.add(NoteMessaging::Keys::CIPHER, "aes-256-gcm");
+    offer.add(NoteMessaging::Keys::PUBLIC_KEY,
+              NoteBytes::Value(public_key.data(),
+                               public_key.size(),
+                               NoteBytes::Type::RAW_BYTES));
+
+    send_routed_control_message(device_id, offer);
+
+    syslog(LOG_INFO,
+           "Sent ENCRYPTION_OFFER for device: %s",
+           device_id.c_str());
+}
+
+void DeviceSession::send_device_encryption_error(
+    const std::string& device_id,
+    const std::string& reason) {
+    NoteBytes::Object error;
+    error.add(NoteMessaging::Keys::CONTROL,
+              NoteMessaging::ProtocolMessages::ERROR);
+    error.add(NoteMessaging::Keys::ERROR,
+              NoteMessaging::ErrorCodes::ENCRYPTION_FAILED);
+    error.add(NoteMessaging::Keys::MSG, reason);
+
+    send_routed_control_message(device_id, error);
+
+    syslog(LOG_ERR,
+           "Encryption error for device %s: %s",
+           device_id.c_str(), reason.c_str());
+
+    // Clean up DH context
+    device_dh_keys_.erase(device_id);
+    NoteDaemon::get_encryption_provider().remove_device(device_id);
+}
