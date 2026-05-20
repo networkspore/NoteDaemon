@@ -168,6 +168,8 @@ namespace NoteMessaging {
         inline const NoteBytes::Value DEVICE_TYPE("device_type");
         inline const NoteBytes::Value CLAIMED("claimed");
         inline const NoteBytes::Value SCAN_LEVEL_MIN("scan_level_min");
+        inline const NoteBytes::Value FORCE_SCAN("force_scan");
+        inline const NoteBytes::Value INCLUDE_HISTORICAL("include_historical");
         inline const NoteBytes::Value REQUIRED_CAPABILITIES("required_capabilities");
         inline const NoteBytes::Value FILTER("filter");
         inline const NoteBytes::Value MODULE_FILTER("module_filter");

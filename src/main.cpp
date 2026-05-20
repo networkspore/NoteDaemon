@@ -777,6 +777,26 @@ private:
             syslog(LOG_WARNING, "run_management_loop unknown exception (pid=%d)", client_pid);
         }
 
+        // Best-effort per-module client cleanup when a management connection
+        // closes unexpectedly. This prevents stale claims from surviving
+        // crashed/disconnected clients.
+        for (auto* mod : module_registry_.get_all_modules()) {
+            if (!mod) continue;
+            try {
+                mod->cleanup_client(client_pid);
+            } catch (const std::exception& e) {
+                syslog(LOG_WARNING,
+                       "cleanup_client() exception for module=%s pid=%d: %s",
+                       std::string(mod->name()).c_str(),
+                       client_pid, e.what());
+            } catch (...) {
+                syslog(LOG_WARNING,
+                       "cleanup_client() unknown exception for module=%s pid=%d",
+                       std::string(mod->name()).c_str(),
+                       client_pid);
+            }
+        }
+
         safe_close(client_fd);
     }
 

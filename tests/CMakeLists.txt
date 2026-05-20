@@ -46,8 +46,14 @@ list(APPEND TEST_SOURCES error_handling_test.cpp)
 # Add device_claim_release test (device claiming and releasing workflow)
 list(APPEND TEST_SOURCES device_claim_release_test.cpp)
 
-# Add other test files here as needed
-# list(APPEND TEST_SOURCES example_test.cpp)
+# Add encryption test
+list(APPEND TEST_SOURCES encryption_test.cpp)
+
+# Add hid_parser (key_code) test
+list(APPEND TEST_SOURCES hid_parser_test.cpp)
+
+# Add notebytes test
+list(APPEND TEST_SOURCES notebytes_test.cpp)
 
 # Create test executable
 add_executable(note-daemon-tests ${TEST_SOURCES})
