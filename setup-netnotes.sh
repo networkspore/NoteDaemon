@@ -154,7 +154,7 @@ main() {
     echo ""
     
     # Step 4: Install binary
-    if prompt_yes_no "Install note-daemon and process-monitor binaries to /usr/local/bin?" "Y"; then
+    if prompt_yes_no "Install note-daemon and process-monitor binaries to /etc/netnotes?" "Y"; then
         print_status "Installing binaries..."
         
         if [[ ! -f "build/note-daemon" ]]; then
@@ -167,9 +167,9 @@ main() {
             exit 1
         fi
         
-        install -m 0755 -o root -g netnotes build/note-daemon /usr/local/bin/note-daemon
-        install -m 0755 -o root -g netnotes build/process-monitor/process-monitor /usr/local/bin/process-monitor
-        print_success "Binaries installed to /usr/local/bin/"
+        install -m 0755 -o root -g netnotes build/note-daemon /etc/netnotes/note-daemon
+        install -m 0755 -o root -g netnotes build/process-monitor/process-monitor /etc/netnotes/process-monitor
+        print_success "Binaries installed to /etc/netnotes/"
         echo "    - note-daemon"
         echo "    - process-monitor"
     else
@@ -324,8 +324,8 @@ main() {
     echo "============================================"
     echo ""
     echo "Installation Summary:"
-    echo "  • Binaries:       /usr/local/bin/note-daemon"
-    echo "                   /usr/local/bin/process-monitor"
+    echo "  • Binaries:       /etc/netnotes/note-daemon"
+    echo "                   /etc/netnotes/process-monitor"
     echo "  • Service:        note-daemon.service"
     echo "  • Udev Rules:     /etc/udev/rules.d/99-netnotes.rules"
     echo "  • User/Group:     netnotes:netnotes"

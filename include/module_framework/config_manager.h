@@ -104,10 +104,26 @@ public:
     Error load_from_file(std::string_view config_path);
     
     // Socket settings
+    std::string socket_type = "unix";  // "unix" or "tcp"
     std::string socket_path = "/run/netnotes/notedaemon.sock";
     std::string socket_dir = "/run/netnotes";
     std::string socket_group = "netnotes";
     mode_t socket_permissions = 0660;
+    
+    // TCP settings (when socket_type = "tcp")
+    std::string bind_address = "127.0.0.1";
+    int listen_port = 0;  // 0 = disabled (unix mode default)
+    
+    // IP allowlisting (TCP mode only)
+    std::vector<std::string> allowed_ips;  // IP addresses or CIDR ranges
+    bool deny_unlisted = true;  // deny connections not in allow list
+    
+    // TLS settings (TCP mode only)
+    bool tls_enabled = false;
+    std::string tls_cert_file = "/etc/netnotes/certs/server.crt";
+    std::string tls_key_file = "/etc/netnotes/certs/server.key";
+    std::string tls_ca_file = "/etc/netnotes/certs/ca.crt";
+    bool tls_require_client_cert = false;  // true = mutual TLS (mTLS)
     
     // Logging
     int log_level = LOG_INFO;

@@ -12,7 +12,7 @@ StateDirectory=netnotes
 StateDirectoryMode=0750
 Environment=NETNOTES_ROOT=/var/lib/netnotes
 
-ExecStart=/usr/local/bin/note-daemon
+ExecStart=/etc/netnotes/note-daemon
 Restart=no
 RestartSec=5s
 

@@ -625,29 +625,40 @@ namespace NoteBytes {
     /**
      * Interpret this Value as an Object.
      * Only valid if type() == Type::OBJECT.
+     *
+     * The Reader stores raw pair data in the Value (no type/length prefix),
+     * so we must use deserialize() — NOT deserialize_from_packet() which
+     * expects a packet header that isn't present.
      */
     inline Object as_object(const Value& v) {
-        if (v.type() != Type::OBJECT || v.data().size() < METADATA_SIZE) {
-            throw std::runtime_error("Value is not a valid OBJECT");
+        if (v.type() != Type::OBJECT) {
+            throw std::runtime_error("Value is not an OBJECT type");
         }
-        return Object::deserialize_from_packet(v.data().data());
+        if (v.data().empty()) {
+            return Object();
+        }
+        return Object::deserialize(v.data().data(), v.data().size());
     }
 
     /**
      * Interpret this Value as an Array.
      * Only valid if type() == Type::ARRAY.
+     *
+     * The Reader stores raw value data in the Value (no type/length prefix),
+     * so we must read values directly — NOT assume a packet header.
      */
     inline Array as_array(const Value& v) {
-        if (v.type() != Type::ARRAY || v.data().size() < METADATA_SIZE) {
-            throw std::runtime_error("Value is not a valid ARRAY");
+        if (v.type() != Type::ARRAY) {
+            throw std::runtime_error("Value is not an ARRAY type");
         }
-        uint32_t len = (v.data()[1] << 24) | (v.data()[2] << 16) |
-                       (v.data()[3] << 8) | v.data()[4];
-        const uint8_t* body = v.data().data() + METADATA_SIZE;
         Array arr;
+        if (v.data().empty()) {
+            return arr;
+        }
         size_t offset = 0;
-        while (offset < len) {
-            Value val = Value::read_from(body, offset);
+        const auto& data = v.data();
+        while (offset < data.size()) {
+            Value val = Value::read_from(data.data(), offset);
             arr.add(val);
         }
         return arr;

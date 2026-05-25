@@ -1,0 +1,39 @@
+# TCP+TLS test configuration
+# Use with: sudo /etc/netnotes/note-daemon --config /path/to/this/file
+
+# Root for Netnotes system paths
+root.path=/var/lib/netnotes
+
+# Socket configuration - TCP mode with TLS
+socket.type=tcp
+socket.bind_address=127.0.0.1
+socket.listen_port=9876
+
+# IP allowlisting (optional, can have multiple entries)
+# socket.allow=127.0.0.1
+# socket.allow=192.168.1.0/24
+# socket.deny_unlisted=true
+
+# TLS configuration
+tls.enabled=true
+tls.cert_file=/etc/netnotes/certs/server.crt
+tls.key_file=/etc/netnotes/certs/server.key
+tls.ca_file=/etc/netnotes/certs/ca.crt
+tls.require_client_cert=false
+
+# Logging
+log.level=info
+log.stderr=true
+
+# Security (disable group check for TCP testing)
+security.require_group=false
+
+# Modules
+modules.directory=/etc/netnotes/modules
+modules.strict_load=false
+modules.health_check=true
+
+# USB
+usb.timeout_ms=100
+usb.discovery_interval_ms=1000
+usb.auto_detach_kernel=true

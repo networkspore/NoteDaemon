@@ -26,7 +26,10 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <pwd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <cstring>
+#include "tls_transport.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -294,7 +297,12 @@ public:
 
         load_modules();
 
-        syslog(LOG_INFO, "Daemon ready on %s", config_.socket_path.c_str());
+        if (config_.socket_type == "tcp") {
+            syslog(LOG_INFO, "Daemon ready on TCP %s:%d",
+                   config_.bind_address.c_str(), config_.listen_port);
+        } else {
+            syslog(LOG_INFO, "Daemon ready on Unix %s", config_.socket_path.c_str());
+        }
 
         fork_process_monitor();
         main_loop();
@@ -319,6 +327,11 @@ private:
 
     libusb_context* usb_ctx_      = nullptr;
     int             server_socket_ = -1;
+    
+    // TLS support
+    std::unique_ptr<TLS::TLSContext> tls_context_;
+    TLS::IPAllowlist ip_allowlist_;
+    bool tcp_mode_ = false;
 
     ThreadManager thread_manager_;
     std::mutex    client_fds_mutex_;
@@ -356,12 +369,47 @@ private:
             config_.socket_path = join_path(config_.socket_dir, "notedaemon.sock");
         }
 
+        // 6) Load socket type and TCP settings
+        config_.socket_type = config_.get_string("socket.type", "unix");
+        config_.bind_address = config_.get_string("socket.bind_address", "127.0.0.1");
+        config_.listen_port = config_.get_int("socket.listen_port", 0);
+        tcp_mode_ = (config_.socket_type == "tcp");
+
+        // Generate socket path for TCP mode if not set
+        if (tcp_mode_ && config_.listen_port > 0) {
+            config_.socket_path = "tcp://" + config_.bind_address + ":" + std::to_string(config_.listen_port);
+        }
+
+        // Initialize IP allowlist for TCP mode
+        if (tcp_mode_ && !config_.allowed_ips.empty()) {
+            for (const auto& ip : config_.allowed_ips) {
+                ip_allowlist_.add(ip);
+            }
+            syslog(LOG_INFO, "IP allowlist: %zu entries loaded", ip_allowlist_.size());
+        }
+
         syslog(LOG_INFO, "=== Daemon Configuration ===");
         syslog(LOG_INFO, "Root: %s", paths_.root.c_str());
-        syslog(LOG_INFO, "Socket: %s (group=%s, perms=0%o)",
-               config_.socket_path.c_str(),
-               config_.socket_group.c_str(),
-               (int)config_.socket_permissions);
+        if (tcp_mode_) {
+            syslog(LOG_INFO, "Socket: TCP %s:%d",
+                   config_.bind_address.c_str(), config_.listen_port);
+            if (config_.tls_enabled) {
+                syslog(LOG_INFO, "TLS: enabled (cert=%s)", config_.tls_cert_file.c_str());
+                if (config_.tls_require_client_cert) {
+                    syslog(LOG_INFO, "TLS: client certificate required (mTLS)");
+                }
+            } else {
+                syslog(LOG_INFO, "TLS: disabled");
+            }
+            if (!ip_allowlist_.empty()) {
+                syslog(LOG_INFO, "IP allowlist: %zu entries", ip_allowlist_.size());
+            }
+        } else {
+            syslog(LOG_INFO, "Socket: Unix %s (group=%s, perms=0%o)",
+                   config_.socket_path.c_str(),
+                   config_.socket_group.c_str(),
+                   (int)config_.socket_permissions);
+        }
         syslog(LOG_INFO, "Module directory: %s", config_.module_directory.c_str());
         syslog(LOG_INFO, "strict_load=%d  health_check=%d",
                config_.strict_load, config_.health_check);
@@ -377,13 +425,16 @@ private:
         }
         libusb_exit(ctx);
 
-        if (mkdir(config_.socket_dir.c_str(), 0755) < 0 && errno != EEXIST) {
-            syslog(LOG_ERR, "Cannot create socket dir: %s", strerror(errno));
-            return false;
-        }
-        if (access(config_.socket_dir.c_str(), W_OK) < 0) {
-            syslog(LOG_ERR, "Socket dir not writable");
-            return false;
+        // Only check socket dir for unix sockets
+        if (config_.socket_type != "tcp") {
+            if (mkdir(config_.socket_dir.c_str(), 0755) < 0 && errno != EEXIST) {
+                syslog(LOG_ERR, "Cannot create socket dir: %s", strerror(errno));
+                return false;
+            }
+            if (access(config_.socket_dir.c_str(), W_OK) < 0) {
+                syslog(LOG_ERR, "Socket dir not writable");
+                return false;
+            }
         }
         return true;
     }
@@ -398,11 +449,18 @@ private:
     }
 
     bool setup_socket() {
+        if (config_.socket_type == "tcp") {
+            return setup_tcp_socket();
+        }
+        return setup_unix_socket();
+    }
+
+    bool setup_unix_socket() {
         unlink(config_.socket_path.c_str());
 
         server_socket_ = socket(AF_UNIX, SOCK_STREAM, 0);
         if (server_socket_ < 0) {
-            syslog(LOG_ERR, "socket(): %s", strerror(errno));
+            syslog(LOG_ERR, "socket(AF_UNIX): %s", strerror(errno));
             return false;
         }
 
@@ -429,6 +487,69 @@ private:
             syslog(LOG_ERR, "listen(): %s", strerror(errno));
             safe_close(server_socket_);
             return false;
+        }
+        return true;
+    }
+
+    bool setup_tcp_socket() {
+        if (config_.listen_port <= 0) {
+            syslog(LOG_ERR, "TCP mode requires socket.listen_port > 0");
+            return false;
+        }
+
+        // TLS is not yet fully integrated with NoteBytes I/O
+        // Disable for now until NoteBytesReader supports SSL_read
+        if (config_.tls_enabled) {
+            syslog(LOG_WARNING, "TLS is configured but not yet fully supported for NoteBytes protocol. "
+                                "Using plain TCP with IP allowlisting for security.");
+            config_.tls_enabled = false;
+        }
+
+        server_socket_ = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_socket_ < 0) {
+            syslog(LOG_ERR, "socket(AF_INET): %s", strerror(errno));
+            return false;
+        }
+
+        // Allow address reuse
+        int opt = 1;
+        if (setsockopt(server_socket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+            syslog(LOG_WARNING, "setsockopt(SO_REUSEADDR): %s", strerror(errno));
+        }
+
+        struct sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(config_.listen_port);
+
+        if (config_.bind_address == "0.0.0.0" || config_.bind_address.empty()) {
+            addr.sin_addr.s_addr = INADDR_ANY;
+        } else {
+            if (inet_pton(AF_INET, config_.bind_address.c_str(), &addr.sin_addr) <= 0) {
+                syslog(LOG_ERR, "Invalid bind address: %s", config_.bind_address.c_str());
+                safe_close(server_socket_);
+                return false;
+            }
+        }
+
+        if (bind(server_socket_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            syslog(LOG_ERR, "bind(%s:%d): %s",
+                   config_.bind_address.c_str(), config_.listen_port, strerror(errno));
+            safe_close(server_socket_);
+            return false;
+        }
+
+        if (listen(server_socket_, 32) < 0) {
+            syslog(LOG_ERR, "listen(): %s", strerror(errno));
+            safe_close(server_socket_);
+            return false;
+        }
+
+        if (config_.tls_enabled) {
+            syslog(LOG_INFO, "TCP+TLS socket enabled on %s:%d",
+                   config_.bind_address.c_str(), config_.listen_port);
+        } else {
+            syslog(LOG_WARNING, "TCP socket enabled (no TLS) - peer credential checks disabled. "
+                                "Ensure network-level access control is in place.");
         }
         return true;
     }
@@ -526,7 +647,7 @@ private:
         if (pid == 0) {
             char ps[32];
             snprintf(ps, sizeof(ps), "%d", getppid());
-            execl("/usr/local/bin/process_monitor", "process_monitor", ps, nullptr);
+            execl("/etc/netnotes/process_monitor", "process_monitor", ps, nullptr);
             _exit(1);
         } else if (pid > 0) {
             syslog(LOG_INFO, "Process monitor started (pid=%d)", pid);
@@ -596,32 +717,65 @@ private:
      * is never blocked.
      */
     void accept_connection() {
-        struct sockaddr_un addr{};
-        socklen_t len = sizeof(addr);
+        int client_fd = -1;
+        pid_t client_pid = 0;
 
-        int client_fd = accept(server_socket_, (struct sockaddr*)&addr, &len);
-        if (client_fd < 0) {
-            syslog(LOG_WARNING, "accept(): %s", strerror(errno));
-            return;
+        if (tcp_mode_) {
+            // TCP accept
+            struct sockaddr_in addr{};
+            socklen_t len = sizeof(addr);
+
+            client_fd = accept(server_socket_, (struct sockaddr*)&addr, &len);
+            if (client_fd < 0) {
+                syslog(LOG_WARNING, "accept(): %s", strerror(errno));
+                return;
+            }
+
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
+
+            // Check IP allowlist
+            if (!ip_allowlist_.empty() && !ip_allowlist_.is_allowed(ip_str)) {
+                syslog(LOG_WARNING, "TCP connection rejected: %s not in allowlist", ip_str);
+                safe_close(client_fd);
+                return;
+            }
+
+            syslog(LOG_INFO, "TCP connection from %s:%d fd=%d",
+                   ip_str, ntohs(addr.sin_port), client_fd);
+
+            // No peer credentials for TCP - use 0 as placeholder
+            client_pid = 0;
+        } else {
+            // Unix socket accept
+            struct sockaddr_un addr{};
+            socklen_t len = sizeof(addr);
+
+            client_fd = accept(server_socket_, (struct sockaddr*)&addr, &len);
+            if (client_fd < 0) {
+                syslog(LOG_WARNING, "accept(): %s", strerror(errno));
+                return;
+            }
+
+            // Peer credentials (Unix only)
+            struct ucred creds{};
+            socklen_t clen = sizeof(creds);
+            if (getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &creds, &clen) < 0) {
+                syslog(LOG_WARNING, "SO_PEERCRED: %s", strerror(errno));
+                safe_close(client_fd);
+                return;
+            }
+
+            if (!check_group_access(creds.uid)) {
+                syslog(LOG_WARNING, "Access denied: uid=%d", creds.uid);
+                safe_close(client_fd);
+                return;
+            }
+
+            client_pid = creds.pid;
+            syslog(LOG_INFO, "Connection from uid=%d pid=%d fd=%d",
+                   creds.uid, creds.pid, client_fd);
         }
-
-        // Peer credentials
-        struct ucred creds{};
-        socklen_t clen = sizeof(creds);
-        if (getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &creds, &clen) < 0) {
-            syslog(LOG_WARNING, "SO_PEERCRED: %s", strerror(errno));
-            safe_close(client_fd);
-            return;
-        }
-
-        if (!check_group_access(creds.uid)) {
-            syslog(LOG_WARNING, "Access denied: uid=%d", creds.uid);
-            safe_close(client_fd);
-            return;
-        }
-
-        syslog(LOG_INFO, "Connection from uid=%d pid=%d fd=%d",
-               creds.uid, creds.pid, client_fd);
 
         // Track client fd for shutdown-time cleanup
         {
@@ -632,8 +786,23 @@ private:
         // Read the first message to classify the connection.
         // This is done in a worker thread so accept_connection() returns
         // immediately.  Timeout/error handling is inside the thread.
-        auto t = std::thread([this, client_fd, pid = creds.pid]() mutable {
+        // If TLS is enabled, wrap the connection first.
+        auto t = std::thread([this, client_fd, pid = client_pid, use_tls = tls_context_ != nullptr]() mutable {
             try {
+                // Perform TLS handshake if enabled
+                if (use_tls && tls_context_) {
+                    auto tls_conn = std::make_unique<TLS::TLSConnection>(tls_context_->get(), client_fd);
+                    if (!tls_conn->accept()) {
+                        syslog(LOG_ERR, "TLS handshake failed for fd=%d", client_fd);
+                        safe_close(client_fd);
+                        return;
+                    }
+                    // For TLS, we need to use SSL for all I/O
+                    // TODO: Refactor NoteBytesReader to support SSL_read
+                    syslog(LOG_ERR, "TLS connections not yet fully supported for NoteBytes protocol");
+                    safe_close(client_fd);
+                    return;
+                }
                 dispatch_new_connection(client_fd, pid);
             } catch (const std::exception& e) {
                 syslog(LOG_ERR, "Unhandled exception in connection thread (pid=%d): %s",
@@ -1269,7 +1438,10 @@ private:
         AsyncLogger::Logger::log_info("SHUTDOWN-13: closing server socket", "NoteDaemon");
         if (server_socket_ >= 0) {
             safe_close(server_socket_);
-            unlink(config_.socket_path.c_str());
+            // Only unlink for Unix sockets (TCP has no file to clean up)
+            if (config_.socket_type != "tcp") {
+                unlink(config_.socket_path.c_str());
+            }
         }
 
         // 5) Detach tracked worker threads (non-blocking teardown)

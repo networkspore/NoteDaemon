@@ -18,10 +18,10 @@ udevadm trigger
 rm -rf /var/lib/netnotes /run/netnotes /var/run/netnotes
 
 # Remove binaries
-rm -f /usr/local/bin/note-daemon
-rm -f /usr/local/bin/process-monitor
+rm -f /etc/netnotes/note-daemon
+rm -f /etc/netnotes/process-monitor
 
-echo "Removed binaries from /usr/local/bin/"
+echo "Removed binaries from /etc/netnotes/"
 
 
 # Remove netnotes user

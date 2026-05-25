@@ -67,7 +67,7 @@ target_compile_options(note-daemon PRIVATE
 
 # Install rules
 install(TARGETS note-daemon
-    RUNTIME DESTINATION /usr/local/bin
+    RUNTIME DESTINATION /etc/netnotes
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                 GROUP_READ GROUP_EXECUTE
                 WORLD_READ WORLD_EXECUTE

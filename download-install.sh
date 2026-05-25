@@ -123,8 +123,8 @@ main() {
     
     # Step 7: Install binary
     print_status "Installing note-daemon binary..."
-    install -m 0755 -o root -g netnotes note-daemon /usr/local/bin/note-daemon
-    print_success "Binary installed to /usr/local/bin/note-daemon"
+    install -m 0755 -o root -g netnotes note-daemon /etc/netnotes/note-daemon
+    print_success "Binary installed to /etc/netnotes/note-daemon"
     
     # Step 8: Install udev rules
     cd ..
@@ -226,7 +226,7 @@ main() {
     echo "============================================"
     echo ""
     echo "Installation Summary:"
-    echo "  • Binary:         /usr/local/bin/note-daemon"
+    echo "  • Binary:         /etc/netnotes/note-daemon"
     echo "  • Service:        note-daemon.service"
     echo "  • Udev Rules:     /etc/udev/rules.d/99-netnotes.rules"
     echo "  • User/Group:     netnotes:netnotes"

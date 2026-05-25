@@ -51,6 +51,9 @@ namespace Bits {
     constexpr int HID_DEVICE           = 33;
     constexpr int USB_DEVICE           = 34;
     constexpr int BLUETOOTH_DEVICE     = 35;
+    constexpr int VIDEO_DEVICE         = 36;
+    constexpr int VIDEO_STREAMING      = 37;
+    constexpr int FRAME_CAPTURE        = 38;
      
     constexpr int ENCRYPTION_SUPPORTED = 40;
     constexpr int ENCRYPTION_ENABLED   = 41;
@@ -66,8 +69,20 @@ namespace Bits {
     
     constexpr int COMPOSITE_SOURCE     = 56;
     constexpr int MULTIPLE_CHILDREN    = 57;
-    
+
+    // Camera Algorithm Capabilities (CPU-friendly, bits 60-67)
+    constexpr int MOTION_DETECTION     = 60;
+    constexpr int SCENE_CHANGE         = 61;
+    constexpr int ROI_CAPTURE          = 62;
+    constexpr int PRIVACY_MASKING      = 63;
+    constexpr int TIMESTAMP_OVERLAY    = 64;
+    constexpr int FRAME_AVERAGING      = 65;
+    constexpr int BACKGROUND_SUBTRACT  = 66;
+    constexpr int MOTION_VECTORS       = 67;
+
     const std::vector<int> MODE_BITS = {RAW_MODE, PARSED_MODE, PASSTHROUGH_MODE, FILTERED_MODE};
+    const std::vector<int> CAMERA_ALGO_BITS = {MOTION_DETECTION, SCENE_CHANGE, ROI_CAPTURE,
+        PRIVACY_MASKING, TIMESTAMP_OVERLAY, FRAME_AVERAGING, BACKGROUND_SUBTRACT, MOTION_VECTORS};
 }
 
 namespace Masks {
@@ -136,7 +151,20 @@ namespace Names {
             case Bits::HID_DEVICE: return "hid_device";
             case Bits::USB_DEVICE: return "usb_device";
             case Bits::BLUETOOTH_DEVICE: return "bluetooth_device";
-            
+            case Bits::VIDEO_DEVICE: return "video_device";
+            case Bits::VIDEO_STREAMING: return "video_streaming";
+            case Bits::FRAME_CAPTURE: return "frame_capture";
+
+            // Camera algorithm capabilities
+            case Bits::MOTION_DETECTION: return "motion_detection";
+            case Bits::SCENE_CHANGE: return "scene_change";
+            case Bits::ROI_CAPTURE: return "roi_capture";
+            case Bits::PRIVACY_MASKING: return "privacy_masking";
+            case Bits::TIMESTAMP_OVERLAY: return "timestamp_overlay";
+            case Bits::FRAME_AVERAGING: return "frame_averaging";
+            case Bits::BACKGROUND_SUBTRACT: return "background_subtract";
+            case Bits::MOTION_VECTORS: return "motion_vectors";
+
             case Bits::ENCRYPTION_SUPPORTED: return "encryption_supported";
             case Bits::ENCRYPTION_ENABLED: return "encryption_enabled";
             case Bits::BUFFERING_SUPPORTED: return "buffering_supported";
@@ -178,7 +206,20 @@ namespace Names {
             {"hid_device", Bits::HID_DEVICE},
             {"usb_device", Bits::USB_DEVICE},
             {"bluetooth_device", Bits::BLUETOOTH_DEVICE},
-            
+            {"video_device", Bits::VIDEO_DEVICE},
+            {"video_streaming", Bits::VIDEO_STREAMING},
+            {"frame_capture", Bits::FRAME_CAPTURE},
+
+            // Camera algorithm capabilities
+            {"motion_detection", Bits::MOTION_DETECTION},
+            {"scene_change", Bits::SCENE_CHANGE},
+            {"roi_capture", Bits::ROI_CAPTURE},
+            {"privacy_masking", Bits::PRIVACY_MASKING},
+            {"timestamp_overlay", Bits::TIMESTAMP_OVERLAY},
+            {"frame_averaging", Bits::FRAME_AVERAGING},
+            {"background_subtract", Bits::BACKGROUND_SUBTRACT},
+            {"motion_vectors", Bits::MOTION_VECTORS},
+
             {"encryption_supported", Bits::ENCRYPTION_SUPPORTED},
             {"encryption_enabled", Bits::ENCRYPTION_ENABLED},
             {"buffering_supported", Bits::BUFFERING_SUPPORTED},
@@ -339,7 +380,27 @@ namespace Detection {
         State::bit_set(caps, Bits::BUFFERING_SUPPORTED);
         return caps;
     }
-    
+
+    inline cpp_int detect_camera_capabilities() {
+        cpp_int caps = 0;
+        State::bit_set(caps, Bits::USB_DEVICE);
+        State::bit_set(caps, Bits::VIDEO_DEVICE);
+        State::bit_set(caps, Bits::VIDEO_STREAMING);
+        State::bit_set(caps, Bits::FRAME_CAPTURE);
+        State::bit_set(caps, Bits::DEVICE_TYPE_KNOWN);
+        State::bit_set(caps, Bits::RAW_MODE);
+        State::bit_set(caps, Bits::PASSTHROUGH_MODE);
+        State::bit_set(caps, Bits::ENCRYPTION_SUPPORTED);
+        State::bit_set(caps, Bits::BUFFERING_SUPPORTED);
+        // CPU-friendly algorithm capabilities
+        State::bit_set(caps, Bits::MOTION_DETECTION);
+        State::bit_set(caps, Bits::SCENE_CHANGE);
+        State::bit_set(caps, Bits::ROI_CAPTURE);
+        State::bit_set(caps, Bits::PRIVACY_MASKING);
+        State::bit_set(caps, Bits::TIMESTAMP_OVERLAY);
+        return caps;
+    }
+
     inline int get_default_mode(const std::string& device_type) {
         if (device_type == "unknown") {
             return Bits::RAW_MODE;

@@ -173,55 +173,99 @@ if [ "$INSTALL" = true ]; then
     fi
 
     # Stop the daemon before replacing files
-    if systemctl list-units --type=service | grep -q "$SERVICE_NAME"; then
+    if systemctl list-unit-files --type=service | grep -q "$SERVICE_NAME"; then
         echo "[*] Stopping $SERVICE_NAME before upgrade..."
         $ELEV systemctl stop "$SERVICE_NAME" || true
         echo "[✓] $SERVICE_NAME stopped"
     fi
 
     # Install NoteDaemon binary
-    echo "[*] Installing NoteDaemon to /usr/local/bin/..."
-    $ELEV cp "$BUILD_DIR_ABS/note-daemon" /usr/local/bin/
+    echo "[*] Installing NoteDaemon to /etc/netnotes/..."
+    $ELEV cp "$BUILD_DIR_ABS/note-daemon" /etc/netnotes/
     if [ -f "$BUILD_DIR_ABS/process-monitor/process-monitor" ]; then
-        $ELEV cp "$BUILD_DIR_ABS/process-monitor/process-monitor" /usr/local/bin/
+        $ELEV cp "$BUILD_DIR_ABS/process-monitor/process-monitor" /etc/netnotes/
     fi
     echo "[✓] NoteDaemon installed"
 
-    # Install default config next to the binary
+    # Install systemd service file
+    echo "[*] Installing $SERVICE_NAME to /etc/systemd/system/..."
+    $ELEV cp "$SCRIPT_DIR/$SERVICE_NAME" /etc/systemd/system/
+    $ELEV chmod 644 /etc/systemd/system/$SERVICE_NAME
+    $ELEV systemctl daemon-reload
+    echo "[✓] Systemd service installed"
+
+    # Install default config
     DEFAULT_CONFIG="$SCRIPT_DIR/config.default"
     if [ -f "$DEFAULT_CONFIG" ]; then
-        echo "[*] Installing config to /usr/local/bin/note-daemon-config"
-        $ELEV cp "$DEFAULT_CONFIG" /usr/local/bin/note-daemon-config
-        $ELEV chmod 644 /usr/local/bin/note-daemon-config
+        echo "[*] Installing config to /etc/netnotes/note-daemon-config"
+        $ELEV cp "$DEFAULT_CONFIG" /etc/netnotes/note-daemon-config
+        $ELEV chmod 644 /etc/netnotes/note-daemon-config
         echo "[✓] Config installed"
     else
         echo "[!] Warning: config.default not found in NoteDaemon; skipping config install"
     fi
 
-    # Create modules directory next to the binary
-    echo "[*] Creating modules directory at /usr/local/bin/modules..."
-    $ELEV mkdir -p /usr/local/bin/modules/note_usb
-    $ELEV chmod -R 755 /usr/local/bin/modules
+    # Create modules directory under /etc/netnotes
+    echo "[*] Creating modules directory at /etc/netnotes/modules..."
+    $ELEV mkdir -p /etc/netnotes/modules/note_usb
+    $ELEV chmod -R 755 /etc/netnotes/modules
     echo "[✓] Modules directory created"
 
     # Install NoteUSB module
     if [ "$SKIP_USB" = false ]; then
-        echo "[*] Installing NoteUSB module to /usr/local/bin/modules/note_usb..."
-        $ELEV cp "$NOTEUSB_BUILD_DIR_ABS/note_usb.so" /usr/local/bin/modules/note_usb/
-        $ELEV cp "$NOTEUSB_DIR_ABS/config.json" /usr/local/bin/modules/note_usb/
+        echo "[*] Installing NoteUSB module to /etc/netnotes/modules/note_usb..."
+        $ELEV cp "$NOTEUSB_BUILD_DIR_ABS/note_usb.so" /etc/netnotes/modules/note_usb/
+        $ELEV cp "$NOTEUSB_DIR_ABS/config.json" /etc/netnotes/modules/note_usb/
         if [ -f "$NOTEUSB_BUILD_DIR_ABS/monitor/note_usb_monitor" ]; then
-            $ELEV cp "$NOTEUSB_BUILD_DIR_ABS/monitor/note_usb_monitor" /usr/local/bin/modules/note_usb/
+            $ELEV cp "$NOTEUSB_BUILD_DIR_ABS/monitor/note_usb_monitor" /etc/netnotes/modules/note_usb/
         fi
         echo "[✓] NoteUSB installed"
     fi
 
-    # Create root and subdirectories under /etc/netnotes
+    # Create subdirectories under /etc/netnotes
     echo "[*] Preparing /etc/netnotes directories..."
     $ELEV mkdir -p /etc/netnotes/runtime
     $ELEV mkdir -p /etc/netnotes/logs
     $ELEV mkdir -p /etc/netnotes/note_usb/device_registry
+    $ELEV mkdir -p /etc/netnotes/certs
     $ELEV chmod -R 755 /etc/netnotes
     echo "[✓] /etc/netnotes directories created"
+    
+    # Generate self-signed TLS certificates if not present
+    if [ ! -f /etc/netnotes/certs/server.crt ] || [ ! -f /etc/netnotes/certs/server.key ]; then
+        echo "[*] Generating self-signed TLS certificates..."
+        # Generate CA key and certificate
+        $ELEV openssl genrsa -out /etc/netnotes/certs/ca.key 4096 2>/dev/null
+        $ELEV openssl req -new -x509 -days 3650 -key /etc/netnotes/certs/ca.key \
+            -out /etc/netnotes/certs/ca.crt \
+            -subj "/CN=Netnotes CA/O=Netnotes Development" 2>/dev/null
+        
+        # Generate server key and certificate signing request
+        $ELEV openssl genrsa -out /etc/netnotes/certs/server.key 2048 2>/dev/null
+        $ELEV openssl req -new -key /etc/netnotes/certs/server.key \
+            -out /etc/netnotes/certs/server.csr \
+            -subj "/CN=localhost/O=Netnotes Daemon" 2>/dev/null
+        
+        # Sign server certificate with CA
+        $ELEV openssl x509 -req -days 365 \
+            -in /etc/netnotes/certs/server.csr \
+            -CA /etc/netnotes/certs/ca.crt \
+            -CAkey /etc/netnotes/certs/ca.key \
+            -CAcreateserial \
+            -out /etc/netnotes/certs/server.crt 2>/dev/null
+        
+        # Set permissions
+        $ELEV chmod 600 /etc/netnotes/certs/*.key
+        $ELEV chmod 644 /etc/netnotes/certs/*.crt
+        $ELEV rm -f /etc/netnotes/certs/server.csr /etc/netnotes/certs/ca.srl
+        
+        echo "[✓] TLS certificates generated"
+        echo "    - CA cert: /etc/netnotes/certs/ca.crt"
+        echo "    - Server cert: /etc/netnotes/certs/server.crt"
+        echo "    - Server key: /etc/netnotes/certs/server.key"
+    else
+        echo "[*] TLS certificates already exist, skipping generation"
+    fi
 
     # Ensure runtime directory /run/netnotes for socket and module runtime dirs
     echo "[*] Ensuring runtime directory /run/netnotes..."
@@ -237,7 +281,7 @@ if [ "$INSTALL" = true ]; then
 
     # Restart service
     echo "[*] Restarting systemd service: $SERVICE_NAME"
-    if systemctl list-units --type=service | grep -q "$SERVICE_NAME"; then
+    if systemctl list-unit-files --type=service | grep -q "$SERVICE_NAME"; then
         $ELEV systemctl daemon-reload
         $ELEV systemctl restart "$SERVICE_NAME"
 
@@ -272,7 +316,7 @@ if [ "$SKIP_USB" = false ]; then
     fi
     echo ""
     echo "=== INSTALL PATHS (for reference) ==="
-    echo "    - note-daemon -> /usr/local/bin/note-daemon"
-    echo "    - config -> /usr/local/bin/note-daemon-config (from ../config.default)"
-    echo "    - modules -> /usr/local/bin/modules/note_usb/note_usb.so"
+    echo "    - note-daemon -> /etc/netnotes/note-daemon"
+    echo "    - config -> /etc/netnotes/note-daemon-config (from ../config.default)"
+    echo "    - modules -> /etc/netnotes/modules/note_usb/note_usb.so"
 fi
