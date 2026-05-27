@@ -100,10 +100,12 @@ public:
      * module owns the connecting device.  The module takes full ownership of
      * client_fd (including closing it when the session ends).
      *
-     * @param client_fd  Device socket fd. Module owns its full lifecycle.
-     * @param client_pid Client process ID (for logging / session keying).
+     * @param client_fd   Device socket fd. Module owns its full lifecycle.
+     * @param client_pid  Client process ID (for logging / session keying).
+     * @param device_id   Device identifier from the DEVICE_HANDSHAKE message.
      */
-    virtual Error handle_client(int client_fd, pid_t client_pid) = 0;
+    virtual Error handle_client(int client_fd, pid_t client_pid,
+                                const std::string& device_id) = 0;
 
     /**
      * cleanup_client() – called when a client disconnects from a device socket.

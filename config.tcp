@@ -1,0 +1,26 @@
+# NoteDaemon configuration - TCP mode with IP allowlisting
+# Use this config for testing TCP transport
+
+# Root for Netnotes system paths
+root.path=/var/lib/netnotes
+
+# Socket configuration - TCP mode
+socket.type=tcp
+socket.bind_address=127.0.0.1
+socket.listen_port=9876
+
+# IP allowlisting (CIDR notation supported)
+socket.allow=127.0.0.1
+socket.deny_unlisted=true
+
+# Logging
+log.level=info
+log.stderr=false
+
+# Security (disable group check for TCP - use IP allowlist instead)
+security.require_group=false
+
+# USB / discovery
+usb.timeout_ms=100
+usb.discovery_interval_ms=1000
+usb.auto_detach_kernel=true

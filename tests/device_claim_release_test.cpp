@@ -102,8 +102,9 @@ TEST_F(DeviceClaimReleaseTest, ModuleRegistryOperations) {
         Error stop() override { return Error(0, ""); }
         void shutdown() override {}
         
-        Error handle_client(int client_fd, pid_t client_pid) override {
-            (void)client_fd; (void)client_pid;
+        Error handle_client(int client_fd, pid_t client_pid,
+                            const std::string& device_id) override {
+            (void)client_fd; (void)client_pid; (void)device_id;
             return Error(0, "");
         }
         void cleanup_client(pid_t client_pid) override {

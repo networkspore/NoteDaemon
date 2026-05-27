@@ -7,12 +7,26 @@
 # from the binary location: <binary_dir>/modules
 root.path=/var/lib/netnotes
 
-# Socket (must match a directory that the daemon user can write to)
+# Socket type: "unix" (default) or "tcp"
+# socket.type=unix
+
+# === Unix Socket Settings (default) ===
 socket.path=/run/netnotes/notedaemon.sock
 socket.dir=/run/netnotes
 socket.group=netnotes
 # Decimal mode value (432 decimal = 0660 octal)
 socket.permissions=432
+
+# === TCP Socket Settings ===
+# Uncomment to enable TCP mode:
+# socket.type=tcp
+# socket.bind_address=127.0.0.1
+# socket.listen_port=9876
+#
+# IP allowlisting (CIDR notation supported)
+# socket.allow=127.0.0.1
+# socket.allow=192.168.1.0/24
+# socket.deny_unlisted=true
 
 # Logging (journal via systemd; stderr for local debugging)
 log.level=info

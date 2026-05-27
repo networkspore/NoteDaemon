@@ -12,6 +12,11 @@ StateDirectory=netnotes
 StateDirectoryMode=0750
 Environment=NETNOTES_ROOT=/var/lib/netnotes
 
+# X11 environment for screen capture and input injection (NoteRemote module)
+# Uncomment and set these when using --remote build flag:
+# Environment=DISPLAY=:0
+# Environment=XAUTHORITY=/run/user/1001/gdm/Xauthority
+
 ExecStart=/etc/netnotes/note-daemon
 Restart=no
 RestartSec=5s

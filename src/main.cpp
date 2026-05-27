@@ -900,7 +900,7 @@ private:
                device_id.c_str(), module_id.c_str(), client_pid);
 
         // Module owns client_fd entirely from here
-        Error err = module->handle_client(client_fd, client_pid);
+        Error err = module->handle_client(client_fd, client_pid, device_id);
         if (err.failed()) {
             syslog(LOG_ERR, "handle_client() failed for module=%s device=%s: %s",
                    module_id.c_str(), device_id.c_str(), err.message().data());
