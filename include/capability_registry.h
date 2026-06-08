@@ -70,6 +70,11 @@ namespace Bits {
     constexpr int COMPOSITE_SOURCE     = 56;
     constexpr int MULTIPLE_CHILDREN    = 57;
 
+    // Hardware Wallet Capabilities (bits 58-59)
+    constexpr int HARDWARE_WALLET      = 58;  // Ledger, Trezor, etc.
+    constexpr int APDU_PROTOCOL        = 59;  // APDU-based communication
+    constexpr int LEDGER_MODE          = 12;  // Ledger APDU mode (in mode range 8-15)
+
     // Camera Algorithm Capabilities (CPU-friendly, bits 60-67)
     constexpr int MOTION_DETECTION     = 60;
     constexpr int SCENE_CHANGE         = 61;
@@ -80,7 +85,7 @@ namespace Bits {
     constexpr int BACKGROUND_SUBTRACT  = 66;
     constexpr int MOTION_VECTORS       = 67;
 
-    const std::vector<int> MODE_BITS = {RAW_MODE, PARSED_MODE, PASSTHROUGH_MODE, FILTERED_MODE};
+    const std::vector<int> MODE_BITS = {RAW_MODE, PARSED_MODE, PASSTHROUGH_MODE, FILTERED_MODE, LEDGER_MODE};
     const std::vector<int> CAMERA_ALGO_BITS = {MOTION_DETECTION, SCENE_CHANGE, ROI_CAPTURE,
         PRIVACY_MASKING, TIMESTAMP_OVERLAY, FRAME_AVERAGING, BACKGROUND_SUBTRACT, MOTION_VECTORS};
 }
@@ -159,6 +164,11 @@ namespace Names {
             case Bits::MOTION_DETECTION: return "motion_detection";
             case Bits::SCENE_CHANGE: return "scene_change";
             case Bits::ROI_CAPTURE: return "roi_capture";
+            
+            // Hardware wallet capabilities
+            case Bits::HARDWARE_WALLET: return "hardware_wallet";
+            case Bits::APDU_PROTOCOL: return "apdu_protocol";
+            case Bits::LEDGER_MODE: return "ledger_mode";
             case Bits::PRIVACY_MASKING: return "privacy_masking";
             case Bits::TIMESTAMP_OVERLAY: return "timestamp_overlay";
             case Bits::FRAME_AVERAGING: return "frame_averaging";
@@ -214,6 +224,11 @@ namespace Names {
             {"motion_detection", Bits::MOTION_DETECTION},
             {"scene_change", Bits::SCENE_CHANGE},
             {"roi_capture", Bits::ROI_CAPTURE},
+            
+            // Hardware wallet capabilities
+            {"hardware_wallet", Bits::HARDWARE_WALLET},
+            {"apdu_protocol", Bits::APDU_PROTOCOL},
+            {"ledger_mode", Bits::LEDGER_MODE},
             {"privacy_masking", Bits::PRIVACY_MASKING},
             {"timestamp_overlay", Bits::TIMESTAMP_OVERLAY},
             {"frame_averaging", Bits::FRAME_AVERAGING},
@@ -398,6 +413,24 @@ namespace Detection {
         State::bit_set(caps, Bits::ROI_CAPTURE);
         State::bit_set(caps, Bits::PRIVACY_MASKING);
         State::bit_set(caps, Bits::TIMESTAMP_OVERLAY);
+        return caps;
+    }
+    
+    /**
+     * Detect capabilities for Ledger hardware wallet devices
+     */
+    inline cpp_int detect_ledger_capabilities() {
+        cpp_int caps = 0;
+        State::bit_set(caps, Bits::HARDWARE_WALLET);
+        State::bit_set(caps, Bits::APDU_PROTOCOL);
+        State::bit_set(caps, Bits::LEDGER_MODE);
+        State::bit_set(caps, Bits::DEVICE_TYPE_KNOWN);
+        State::bit_set(caps, Bits::HID_DEVICE);
+        State::bit_set(caps, Bits::USB_DEVICE);
+        State::bit_set(caps, Bits::RAW_MODE);
+        State::bit_set(caps, Bits::PASSTHROUGH_MODE);
+        State::bit_set(caps, Bits::ENCRYPTION_SUPPORTED);
+        State::bit_set(caps, Bits::BUFFERING_SUPPORTED);
         return caps;
     }
 

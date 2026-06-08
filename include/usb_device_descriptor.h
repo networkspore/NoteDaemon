@@ -15,6 +15,8 @@ struct USBDeviceDescriptor {
     uint16_t vendor_id = 0;
     uint16_t product_id = 0;
     pid_t owner_pid = 0;
+    uint8_t endpoint_in = 0x81;   // EP 1 IN (default HID)
+    uint8_t endpoint_out = 0x01;  // EP 1 OUT (default HID)
 
     NoteBytes::Object to_notebytes() const {
         NoteBytes::Object obj;

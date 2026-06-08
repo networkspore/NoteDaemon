@@ -71,6 +71,11 @@ namespace NoteMessaging {
         inline const NoteBytes::Value RESUME("resume");
         inline const NoteBytes::Value DEVICE_ATTACHED("device_attached");
         inline const NoteBytes::Value DEVICE_DETACHED("device_detached");
+        
+        // APDU / Hardware Wallet Protocol
+        inline const NoteBytes::Value APDU_COMMAND("apdu_command");
+        inline const NoteBytes::Value APDU_RESPONSE("apdu_response");
+        inline const NoteBytes::Value LEDGER_STATUS("ledger_status");
 
         // Encryption Lifecycle
         inline const NoteBytes::Value ENABLE_ENCRYPTION("enable_encryption");
@@ -230,6 +235,10 @@ namespace NoteMessaging {
         inline const NoteBytes::Value PEN("pen");
         inline const NoteBytes::Value SCROLL("scroll");
         
+        // Hardware Wallet Types
+        inline const NoteBytes::Value LEDGER("ledger");
+        inline const NoteBytes::Value HARDWARE_WALLET("hardware_wallet");
+        
         // Window Types (for future use)
         inline const NoteBytes::Value WINDOW("window");
         inline const NoteBytes::Value SCENE("scene");
@@ -248,6 +257,7 @@ namespace NoteMessaging {
         inline const NoteBytes::Value PARSED("parsed");
         inline const NoteBytes::Value PASSTHROUGH("passthrough");
         inline const NoteBytes::Value FILTERED("filtered");
+        inline const NoteBytes::Value LEDGER("ledger");
         inline const NoteBytes::Value UNKNOWN("unknown");
         inline const NoteBytes::Value NONE("none");
     }
