@@ -40,7 +40,9 @@
 #include <thread>
 #include <vector>
 
+#ifdef WITH_LIBUSB
 #include <libusb-1.0/libusb.h>
+#endif
 
 #include "utils.h"
 #include "note_messaging.h"
@@ -292,7 +294,9 @@ public:
             syslog(LOG_ERR, "System requirements not met");
             return 1;
         }
+        #ifdef WITH_LIBUSB
         if (!init_libusb())  return 1;
+        #endif
         if (!setup_socket()) return 1;
 
         load_modules();
@@ -325,7 +329,9 @@ private:
     Paths                   paths_;
     std::string             cli_root_;
 
+    #ifdef WITH_LIBUSB
     libusb_context* usb_ctx_      = nullptr;
+    #endif
     int             server_socket_ = -1;
     
     // TLS support
@@ -417,6 +423,7 @@ private:
     }
 
     bool validate_requirements() {
+        #ifdef WITH_LIBUSB
         // Quick libusb probe
         libusb_context* ctx = nullptr;
         if (libusb_init(&ctx) < 0) {
@@ -424,6 +431,7 @@ private:
             return false;
         }
         libusb_exit(ctx);
+        #endif
 
         // Only check socket dir for unix sockets
         if (config_.socket_type != "tcp") {
@@ -439,6 +447,7 @@ private:
         return true;
     }
 
+    #ifdef WITH_LIBUSB
     bool init_libusb() {
         int rc = libusb_init(&usb_ctx_);
         if (rc < 0) {
@@ -447,6 +456,7 @@ private:
         }
         return true;
     }
+#endif
 
     bool setup_socket() {
         if (config_.socket_type == "tcp") {
@@ -1449,12 +1459,16 @@ private:
         thread_manager_.shutdown_all(std::chrono::milliseconds(1000));
         AsyncLogger::Logger::log_info("SHUTDOWN-15: worker thread detach complete", "NoteDaemon");
 
+        #ifdef WITH_LIBUSB
+
         // 6) Exit libusb
         AsyncLogger::Logger::log_info("SHUTDOWN-16: exiting libusb", "NoteDaemon");
         if (usb_ctx_) {
             libusb_exit(usb_ctx_);
             usb_ctx_ = nullptr;
         }
+
+        #endif
 
         // 7) Stop async logger last (other components may still log during shutdown)
         // This is the last AsyncLogger call; after this, we fall back to syslog if needed.
@@ -1513,9 +1527,13 @@ int main(int argc, char* argv[]) {
 
     if (check_only) {
         openlog("notedaemon-check", LOG_PERROR | LOG_PID, LOG_DAEMON);
+        #ifdef WITH_LIBUSB
         libusb_context* ctx = nullptr;
         bool ok = (libusb_init(&ctx) == 0);
         if (ok) libusb_exit(ctx);
+        #else
+        bool ok = true; // No libusb
+        #endif
         closelog();
         return ok ? 0 : 1;
     }

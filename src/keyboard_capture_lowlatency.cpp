@@ -241,9 +241,9 @@ void KeyboardCaptureLowLatency::capture_loop() {
         // Wrap libusb_handle_events with lock/unlock to prevent other threads
         // from concurrently calling event handling functions on the same context.
         // See libusb thread-safety docs for details.
-        libusb_lock_events(cfg_.libusb_ctx);
+
         libusb_handle_events_timeout_completed(cfg_.libusb_ctx, &tv, nullptr);
-        libusb_unlock_events(cfg_.libusb_ctx);
+
 
         // Handle reconnection if device was lost
         if (device_lost_.load(std::memory_order_acquire)) {
@@ -259,9 +259,9 @@ void KeyboardCaptureLowLatency::capture_loop() {
     if (xfer_) {
         libusb_cancel_transfer(xfer_);
         struct timeval tv = {0, 100000}; // 100ms to process cancel
-        libusb_lock_events(cfg_.libusb_ctx);
+
         libusb_handle_events_timeout(cfg_.libusb_ctx, &tv);
-        libusb_unlock_events(cfg_.libusb_ctx);
+
         libusb_free_transfer(xfer_);
         xfer_ = nullptr;
     }
