@@ -196,7 +196,7 @@ NoteFileHandle::write_stream(Channel* /*channel*/) {
 }
 
 // =========================================================================
-// Convenience methods
+// Convenience methods — buffer-based encrypt/decrypt (no pipe deadlock)
 // =========================================================================
 
 NoteBytes::Object NoteFileHandle::read_object() {
@@ -204,17 +204,14 @@ NoteBytes::Object NoteFileHandle::read_object() {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     auto svc = service_.lock();
     if (!svc) return NoteBytes::Object();
-    int pipe_fd = svc->decrypt_file(file_path_);
-    if (pipe_fd < 0) return NoteBytes::Object();
-    NoteBytes::Object result;
+    auto buf = svc->read_file_to_buffer(file_path_);
+    if (buf.empty()) return NoteBytes::Object();
     try {
-        NoteBytes::Reader reader(pipe_fd, true);
-        result = reader.read_object();
+        return NoteBytes::Object::deserialize(buf.data(), buf.size());
     } catch (const std::exception& e) {
-        syslog(LOG_WARNING, "[NoteFileHandle] read_object: %s", e.what());
-        ::close(pipe_fd);
+        syslog(LOG_WARNING, "[NoteFileHandle] read_object parse: %s", e.what());
+        return NoteBytes::Object();
     }
-    return result;
 }
 
 bool NoteFileHandle::write_object(const NoteBytes::Object& obj) {
@@ -222,17 +219,8 @@ bool NoteFileHandle::write_object(const NoteBytes::Object& obj) {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     auto svc = service_.lock();
     if (!svc) return false;
-    int rfd=-1, wfd=-1;
-    if (!svc->create_pipe(rfd, wfd)) return false;
-    {
-        NoteBytes::Writer writer(wfd, true);
-        writer.write(obj);
-        writer.flush();
-    }
-    if (!svc->encrypt_file_swap(file_path_, rfd)) {
-        ::close(rfd); return false;
-    }
-    return true;
+    auto data = obj.serialize();
+    return svc->encrypt_buffer_to_file(file_path_, data);
 }
 
 std::vector<uint8_t> NoteFileHandle::read_bytes() {
@@ -240,15 +228,7 @@ std::vector<uint8_t> NoteFileHandle::read_bytes() {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     auto svc = service_.lock();
     if (!svc) return {};
-    int pipe_fd = svc->decrypt_file(file_path_);
-    if (pipe_fd < 0) return {};
-    std::vector<uint8_t> result;
-    uint8_t buf[65536];
-    ssize_t n;
-    while ((n = ::read(pipe_fd, buf, sizeof(buf))) > 0)
-        result.insert(result.end(), buf, buf + n);
-    ::close(pipe_fd);
-    return result;
+    return svc->read_file_to_buffer(file_path_);
 }
 
 bool NoteFileHandle::write_bytes(const uint8_t* data, size_t length) {
@@ -256,19 +236,8 @@ bool NoteFileHandle::write_bytes(const uint8_t* data, size_t length) {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     auto svc = service_.lock();
     if (!svc) return false;
-    int rfd=-1, wfd=-1;
-    if (!svc->create_pipe(rfd, wfd)) return false;
-    size_t written = 0;
-    while (written < length) {
-        ssize_t n = ::write(wfd, data + written, length - written);
-        if (n <= 0) break;
-        written += n;
-    }
-    ::close(wfd);
-    if (!svc->encrypt_file_swap(file_path_, rfd)) {
-        ::close(rfd); return false;
-    }
-    return true;
+    std::vector<uint8_t> buf(data, data + length);
+    return svc->encrypt_buffer_to_file(file_path_, buf);
 }
 
 // =========================================================================

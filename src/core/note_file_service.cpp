@@ -34,7 +34,20 @@ namespace {
      */
     std::vector<uint8_t> random_bytes(size_t length) {
         std::vector<uint8_t> buf(length);
-        RAND_bytes(buf.data(), static_cast<int>(length));
+        // Use RAND_bytes with fallback to avoid blocking on low-entropy systems
+        if (RAND_bytes(buf.data(), static_cast<int>(length)) != 1) {
+            // Fallback: use /dev/urandom directly (guaranteed non-blocking)
+            FILE* f = fopen("/dev/urandom", "rb");
+            if (f) {
+                size_t n = fread(buf.data(), 1, length, f);
+                fclose(f);
+                if (n == length) return buf;
+            }
+            // Last resort: pseudo-random via rand() + time
+            srand(time(nullptr) ^ getpid());
+            for (size_t i = 0; i < length; i++)
+                buf[i] = static_cast<uint8_t>(rand() & 0xFF);
+        }
         return buf;
     }
 
@@ -186,7 +199,9 @@ bool NoteFileService::load_auth_data() {
 }
 
 bool NoteFileService::save_auth_data() {
-    std::lock_guard<std::mutex> lock(auth_mutex_);
+    // Note: caller must hold auth_mutex_ when calling this
+    // (set_initial_password, change_password, and load_auth_data
+    //  all call save_auth_data while already holding the lock)
 
     NoteBytes::Object obj;
     obj.add(NoteBytes::Value("bcrypt"),
@@ -325,26 +340,25 @@ bool NoteFileService::change_password(const std::string& old_password,
     auth_data_.bcrypt_hash = new_hash;
     current_key_ = new_key;
 
-    // Release the lock while re-encrypting (other operations will be blocked
-    // by the mutex, but we'll do re-encrypt outside)
-    // Actually, keep lock for consistency - re-encrypt is fast enough
     if (!save_auth_data()) {
         syslog(LOG_ERR, "[NoteFileService] Password change: save failed");
-        // Revert
-        auth_data_.salt = old_key_; // this is wrong, but illustrative
         return false;
     }
 
+    // Re-encrypt files with old key → new key
+    // (current_key_ is the new key, old_key_ is the old one)
+    auto old_key_copy = old_key_;
+    auto new_key_copy = current_key_;
+    
     auth_mutex_.unlock();
-
-    // Re-encrypt all files with new key
-    bool re_encrypt_ok = re_encrypt_all(new_key);
+    
+    bool re_encrypt_ok = NoteFileLedger::re_encrypt_ledger(
+        config_.ledger_path, old_key_copy, new_key_copy, nullptr);
 
     auth_mutex_.lock();
 
     if (!re_encrypt_ok) {
         syslog(LOG_ERR, "[NoteFileService] Password change: re-encrypt failed");
-        // Rollback?
         return false;
     }
 
@@ -378,13 +392,16 @@ std::unique_ptr<AuthToken> NoteFileService::authenticate(
     token->derived_key = derived;
     token->created_at_ms = now_ms();
 
-    active_tokens_[token->session_id] = std::move(token);
+    // Save session_id BEFORE move so we can look it up afterwards
+    std::string saved_session_id = token->session_id;
+    active_tokens_[saved_session_id] = std::move(token);
 
     syslog(LOG_INFO, "[NoteFileService] Auth success for pid=%d, session=%s",
-           client_pid, active_tokens_[token->session_id]->session_id.c_str());
+           client_pid, saved_session_id.c_str());
 
     // Return a copy of the token (the map owns the original)
-    auto result = std::make_unique<AuthToken>(*active_tokens_[token->session_id]);
+    auto& stored = active_tokens_[saved_session_id];
+    auto result = std::make_unique<AuthToken>(*stored);
     return result;
 }
 
@@ -559,11 +576,8 @@ int NoteFileService::decrypt_file(const std::string& file_path) {
         return -1;
     }
 
-    // Schedule deletion of temp file after read (caller closes fd)
-    // For simplicity, we leak the temp file for now
-    // TODO: clean up temp files
+    // Unlink now — fd stays valid until closed, then file vanishes automatically
     unlink(tmp_path.c_str());
-
     return fd;
 }
 
@@ -604,6 +618,38 @@ bool NoteFileService::encrypt_file_swap(const std::string& file_path,
 bool NoteFileService::encrypt_new_file(const std::string& file_path,
                                         int pipe_fd) {
     return encrypt_file_swap(file_path, pipe_fd);
+}
+
+std::vector<uint8_t> NoteFileService::read_file_to_buffer(
+    const std::string& file_path)
+{
+    struct stat st;
+    if (stat(file_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        syslog(LOG_WARNING, "[NoteFileService] read_file_to_buffer: not found: %s",
+               file_path.c_str());
+        return {};
+    }
+    return NoteFileLedger::aes_decrypt_to_buffer(file_path, current_key_);
+}
+
+bool NoteFileService::encrypt_buffer_to_file(
+    const std::string& file_path,
+    const std::vector<uint8_t>& data)
+{
+    std::string tmp_path = file_path + ".encrypted";
+    if (!NoteFileLedger::aes_encrypt_buffer_to_file(data, tmp_path,
+                                                     current_key_)) {
+        syslog(LOG_ERR, "[NoteFileService] encrypt_buffer_to_file failed: %s",
+               file_path.c_str());
+        unlink(tmp_path.c_str());
+        return false;
+    }
+    if (rename(tmp_path.c_str(), file_path.c_str()) != 0) {
+        syslog(LOG_ERR, "[NoteFileService] rename failed: %s", strerror(errno));
+        unlink(tmp_path.c_str());
+        return false;
+    }
+    return true;
 }
 
 bool NoteFileService::create_pipe(int& read_fd, int& write_fd) {

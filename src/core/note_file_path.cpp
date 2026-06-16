@@ -370,60 +370,106 @@ std::string find_or_create_path(NoteFilePath& path,
         return "";
     }
 
-    // Parse the ledger as NoteBytes pairs
-    // For the full implementation, we need recursive path traversal here.
-    // For now, we do a simplified linear search.
+    // Ledger exists — parse and search
     try {
         NoteBytes::Object ledger_obj = NoteBytes::Object::deserialize(
             decrypted.data(), decrypted.size());
 
-        // Recursive search through the path hierarchy
-        std::function<const NoteBytes::Value*(
-            const NoteBytes::Object&, int)> search_path =
-            [&](const NoteBytes::Object& obj, int level) -> const NoteBytes::Value* {
+        // Recursive search: returns the resolved path string or empty
+        // NOTE: we copy nested objects by value to avoid dangling pointers
+        std::function<std::pair<bool,std::string>(
+            const NoteBytes::Object&, int)> search =
+            [&](const NoteBytes::Object& obj, int level) -> std::pair<bool,std::string> {
             if (level >= path.depth()) {
-                // We've consumed all path segments — look for FILE_PATH
-                return obj.get(NoteFileConstants::FILE_PATH);
+                const auto* fp = obj.get(NoteFileConstants::FILE_PATH);
+                if (fp && fp->type() == NoteBytes::Type::STRING)
+                    return {true, fp->as_string()};
+                return {false, ""};
             }
-
-            const auto& segment = path.target_path()[level];
-            const auto* nested_val = obj.get(segment);
-            if (!nested_val) return nullptr;
-
-            // If this is the last segment and we find FILE_PATH directly,
-            // it means the path is a single level (e.g., {"settings"})
-            if (level == path.depth() - 1 &&
-                nested_val->type() == NoteBytes::Type::STRING) {
-                return nested_val;
+            const auto& seg = path.target_path()[level];
+            const auto* val = obj.get(seg);
+            if (!val) return {false, ""};
+            if (level == path.depth() - 1 && val->type() == NoteBytes::Type::STRING)
+                return {true, val->as_string()};
+            if (val->type() == NoteBytes::Type::OBJECT) {
+                auto nested = NoteBytes::as_object(*val);  // copy by value
+                return search(nested, level + 1);
             }
-
-            // Recurse into nested object
-            if (nested_val->type() == NoteBytes::Type::OBJECT) {
-                auto nested_obj = NoteBytes::as_object(*nested_val);
-                return search_path(nested_obj, level + 1);
-            }
-
-            return nullptr;
+            return {false, ""};
         };
 
-        const auto* found = search_path(ledger_obj, 0);
-        if (found && found->type() == NoteBytes::Type::STRING) {
-            std::string result = found->as_string();
-            path.set_resolved_file_path(result);
-            syslog(LOG_INFO, "[NoteFileLedger] Found existing: %s",
-                   result.c_str());
-            return result;
+        auto [found, found_path] = search(ledger_obj, 0);
+        if (found) {
+            path.set_resolved_file_path(found_path);
+            syslog(LOG_INFO, "[NoteFileLedger] Found: %s", found_path.c_str());
+            return found_path;
         }
 
-        // Path not found — need to add it
-        // For a complete implementation we'd need to rebuild the ledger.
-        // Simplified: just create the data file, the full ledger update
-        // requires a full decrypt→modify→re-encrypt cycle.
-        std::string new_file_path = path.generate_data_file_path();
-        path.set_resolved_file_path(new_file_path);
-        syslog(LOG_INFO, "[NoteFileLedger] Creating new file: %s",
-               new_file_path.c_str());
-        return new_file_path;
+        // Path not found — insert it by rebuilding the ledger
+        syslog(LOG_INFO, "[NoteFileLedger] Inserting new path into ledger");
+        std::string new_fp = path.generate_data_file_path();
+        path.set_resolved_file_path(new_fp);
+
+        // Build the insertion pair: FILE_PATH → new file path
+        NoteBytes::Pair insert_pair = path.create_file_path_pair(0, new_fp);
+
+        // Recursively merge insert_pair into ledger_obj
+        // This walks the path segments and inserts the pair at the right depth
+        std::function<NoteBytes::Object(const NoteBytes::Object&, int)>
+            insert_path = [&](const NoteBytes::Object& obj, int level) -> NoteBytes::Object {
+            NoteBytes::Object result;
+            bool inserted = false;
+
+            if (level < path.depth()) {
+                const auto& seg = path.target_path()[level];
+
+                // Copy existing pairs, potentially replacing the matching key
+                for (const auto& pair : obj.pairs()) {
+                    if (pair.key() == seg) {
+                        // This segment already exists — recurse into it
+                        if (pair.value().type() == NoteBytes::Type::OBJECT) {
+                            auto nested = NoteBytes::as_object(pair.value());
+                            auto merged = insert_path(nested, level + 1);
+                            result.add(seg, merged.as_value());
+                            inserted = true;
+                        } else {
+                            result.add(pair); // keep as-is
+                            inserted = true;
+                        }
+                    } else if (pair.key() == NoteFileConstants::FILE_PATH &&
+                               level == path.depth() - 1) {
+                        // Shouldn't happen (we already checked), but if there's
+                        // a FILE_PATH at our target level, skip it
+                        result.add(insert_pair);
+                        inserted = true;
+                    } else {
+                        result.add(pair);
+                    }
+                }
+            }
+
+            if (!inserted && level < path.depth()) {
+                // Segment not found — insert the whole remaining path
+                // Build the nested structure from this level down
+                auto deep_pair = path.create_file_path_pair(level, new_fp);
+                result.add(deep_pair);
+            }
+
+            return result;
+        };
+
+        auto updated_ledger = insert_path(ledger_obj, 0);
+        auto serialized = updated_ledger.serialize();
+
+        if (!aes_encrypt_buffer_to_file(serialized, path.ledger_path(),
+                                         encryption_key)) {
+            syslog(LOG_ERR, "[NoteFileLedger] Failed to save updated ledger");
+            return "";
+        }
+
+        syslog(LOG_INFO, "[NoteFileLedger] Inserted: %s -> %s",
+               path.ledger_path().c_str(), new_fp.c_str());
+        return new_fp;
 
     } catch (const std::exception& e) {
         syslog(LOG_ERR, "[NoteFileLedger] Parse error: %s", e.what());
@@ -436,15 +482,99 @@ bool delete_from_path(NoteFilePath& path,
 {
     syslog(LOG_INFO, "[NoteFileLedger] delete_from_path: depth=%d recursive=%d",
            path.depth(), path.is_recursive());
-    // Full implementation would:
-    // 1. Decrypt ledger
-    // 2. Traverse to target path
-    // 3. Remove the entry (recursively if requested)
-    // 4. Delete associated data files
-    // 5. Re-encrypt and save ledger
-    // For now, this is a placeholder.
-    (void)encryption_key;
-    return true;
+
+    struct stat st;
+    if (stat(path.ledger_path().c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+        return false;
+
+    auto decrypted = aes_decrypt_to_buffer(path.ledger_path(), encryption_key);
+    if (decrypted.empty()) return false;
+
+    try {
+        NoteBytes::Object ledger_obj = NoteBytes::Object::deserialize(
+            decrypted.data(), decrypted.size());
+
+        // Collect data file paths to delete
+        std::vector<std::string> files_to_delete;
+
+        // Recursively remove the path, collecting files
+        std::function<NoteBytes::Object(const NoteBytes::Object&, int)>
+            remove_path = [&](const NoteBytes::Object& obj, int level) -> NoteBytes::Object {
+            NoteBytes::Object result;
+
+            for (const auto& pair : obj.pairs()) {
+                if (level < path.depth() && pair.key() == path.target_path()[level]) {
+                    if (level == path.depth() - 1) {
+                        // Found the target — check for FILE_PATH
+                        if (pair.value().type() == NoteBytes::Type::STRING) {
+                            files_to_delete.push_back(pair.value().as_string());
+                        } else if (pair.value().type() == NoteBytes::Type::OBJECT) {
+                            // Collect all nested FILE_PATH entries
+                            auto nested = NoteBytes::as_object(pair.value());
+                            auto cleaned = remove_path(nested, level + 1);
+                            // If recursive, we would add all children
+                            // For now, just collect direct FILE_PATH
+                            for (const auto& p : nested.pairs()) {
+                                if (p.key() == NoteFileConstants::FILE_PATH &&
+                                    p.value().type() == NoteBytes::Type::STRING) {
+                                    files_to_delete.push_back(p.value().as_string());
+                                }
+                            }
+                        }
+                        // Skip this entry (don't add to result)
+                    } else {
+                        // Not at target depth yet — recurse
+                        if (pair.value().type() == NoteBytes::Type::OBJECT) {
+                            auto nested = NoteBytes::as_object(pair.value());
+                            auto cleaned = remove_path(nested, level + 1);
+                            // Only add back if the cleaned object is non-empty
+                            if (cleaned.size() > 0) {
+                                result.add(pair.key(), cleaned.as_value());
+                            }
+                        }
+                    }
+                } else if (pair.key() == NoteFileConstants::FILE_PATH &&
+                           path.is_recursive() && level == path.depth() - 1) {
+                    // Recursive delete from this level — collect file
+                    if (pair.value().type() == NoteBytes::Type::STRING) {
+                        files_to_delete.push_back(pair.value().as_string());
+                    }
+                    // Skip in result
+                } else {
+                    result.add(pair);
+                }
+            }
+            return result;
+        };
+
+        auto updated_ledger = remove_path(ledger_obj, 0);
+
+        // Save updated ledger
+        auto serialized = updated_ledger.serialize();
+        if (!aes_encrypt_buffer_to_file(serialized, path.ledger_path(),
+                                         encryption_key)) {
+            syslog(LOG_ERR, "[NoteFileLedger] delete: failed to save ledger");
+            return false;
+        }
+
+        // Delete the collected data files
+        for (const auto& fp : files_to_delete) {
+            if (unlink(fp.c_str()) == 0) {
+                syslog(LOG_INFO, "[NoteFileLedger] Deleted file: %s", fp.c_str());
+            } else {
+                syslog(LOG_WARNING, "[NoteFileLedger] Failed to delete: %s (%s)",
+                       fp.c_str(), strerror(errno));
+            }
+        }
+
+        syslog(LOG_INFO, "[NoteFileLedger] delete_from_path complete: %zu files deleted",
+               files_to_delete.size());
+        return true;
+
+    } catch (const std::exception& e) {
+        syslog(LOG_ERR, "[NoteFileLedger] delete parse error: %s", e.what());
+        return false;
+    }
 }
 
 bool re_encrypt_ledger(const std::string& ledger_path,
@@ -453,6 +583,13 @@ bool re_encrypt_ledger(const std::string& ledger_path,
                        std::function<void(int64_t, int64_t)> callback)
 {
     syslog(LOG_INFO, "[NoteFileLedger] re_encrypt_ledger");
+
+    struct stat st;
+    if (stat(ledger_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        // No ledger file yet — nothing to re-encrypt
+        syslog(LOG_INFO, "[NoteFileLedger] No ledger to re-encrypt");
+        return true;
+    }
 
     // Decrypt with old key
     auto decrypted = aes_decrypt_to_buffer(ledger_path, old_key);

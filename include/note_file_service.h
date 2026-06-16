@@ -218,6 +218,17 @@ public:
      */
     bool encrypt_new_file(const std::string& file_path, int pipe_fd);
 
+    /**
+     * Encrypt a data buffer directly to a file (avoids pipe overhead).
+     */
+    bool encrypt_buffer_to_file(const std::string& file_path,
+                                const std::vector<uint8_t>& data);
+
+    /**
+     * Decrypt a file directly into a byte buffer.
+     */
+    std::vector<uint8_t> read_file_to_buffer(const std::string& file_path);
+
     /** Data directory path. */
     const std::string& data_directory() const { return config_.data_directory; }
 

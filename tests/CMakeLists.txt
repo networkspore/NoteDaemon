@@ -55,6 +55,14 @@ list(APPEND TEST_SOURCES hid_parser_test.cpp)
 # Add notebytes test
 list(APPEND TEST_SOURCES notebytes_test.cpp)
 
+# Add notefile test (encrypted file storage + auth)
+list(APPEND TEST_SOURCES
+    ../src/core/note_file_service.cpp
+    ../src/core/note_file_handle.cpp
+    ../src/core/note_file_path.cpp
+    note_file_test.cpp
+)
+
 # Create test executable
 add_executable(note-daemon-tests ${TEST_SOURCES})
 
