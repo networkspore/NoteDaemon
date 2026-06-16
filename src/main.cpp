@@ -305,9 +305,8 @@ public:
         #endif
         if (!setup_socket()) return 1;
 
-        load_modules();
-
-        // Initialize NoteFile service (auth + encrypted file storage)
+        // Initialize NoteFile service BEFORE modules so they can use it
+        // during their init() / start() for state persistence.
         {
             NoteFileConfig file_config;
             file_config.data_directory = paths_.root + "/data/files";
@@ -317,12 +316,13 @@ public:
             file_service_ = std::make_unique<NoteFileService>(file_config);
             if (file_service_->init()) {
                 set_file_service(file_service_.get());
-                syslog(LOG_INFO, "NoteFileService initialized. Password set: %s",
-                       file_service_->has_password() ? "yes" : "no");
+                syslog(LOG_INFO, "NoteFileService initialized as core service");
             } else {
-                syslog(LOG_WARNING, "NoteFileService init returned false (non-fatal)");
+                syslog(LOG_WARNING, "NoteFileService init returned false");
             }
         }
+
+        load_modules();
 
         if (config_.socket_type == "tcp") {
             syslog(LOG_INFO, "Daemon ready on TCP %s:%d",
