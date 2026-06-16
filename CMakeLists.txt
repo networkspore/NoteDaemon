@@ -45,8 +45,11 @@ set(CORE_SOURCES
     src/core/encryption_api.cpp
     src/core/usb_encryption_provider.cpp
     src/core/path_resolver.cpp
-  src/core/channel.cpp
-  src/core/webrtc_manager.cpp
+    src/core/channel.cpp
+    src/core/webrtc_manager.cpp
+    src/core/note_file_service.cpp
+    src/core/note_file_handle.cpp
+    src/core/note_file_path.cpp
 )
 
 # Combine all sources

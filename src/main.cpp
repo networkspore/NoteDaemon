@@ -67,6 +67,10 @@
 #include "notebytes.h"
 #include "notebytes_writer.h"
 
+// NoteFile service (encrypted file storage + auth provider)
+#include "note_file_service.h"
+#include "note_file_handle.h"
+
 using namespace NoteDaemon;
 using Json = nlohmann::json;
 
@@ -303,6 +307,23 @@ public:
 
         load_modules();
 
+        // Initialize NoteFile service (auth + encrypted file storage)
+        {
+            NoteFileConfig file_config;
+            file_config.data_directory = paths_.root + "/data/files";
+            file_config.ledger_path = paths_.root + "/data/ledger.dat";
+            file_config.settings_path = paths_.root + "/data/settings.dat";
+            
+            file_service_ = std::make_unique<NoteFileService>(file_config);
+            if (file_service_->init()) {
+                set_file_service(file_service_.get());
+                syslog(LOG_INFO, "NoteFileService initialized. Password set: %s",
+                       file_service_->has_password() ? "yes" : "no");
+            } else {
+                syslog(LOG_WARNING, "NoteFileService init returned false (non-fatal)");
+            }
+        }
+
         if (config_.socket_type == "tcp") {
             syslog(LOG_INFO, "Daemon ready on TCP %s:%d",
                    config_.bind_address.c_str(), config_.listen_port);
@@ -329,6 +350,9 @@ private:
     CoreConfig              config_;
     ConfigManager           config_manager_;
   WebRTCManager webrtc_manager_;
+    
+    // NoteFile service (auth + encrypted file storage)
+    std::unique_ptr<NoteFileService> file_service_;
     Paths                   paths_;
     std::string             cli_root_;
 
@@ -1090,6 +1114,36 @@ private:
     return;
   }
 
+  // ── NoteFile / Auth core handlers ──────────────────────────────────
+  if (msg_type == "auth") {
+    handle_note_file_auth(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "set_password") {
+    handle_note_file_set_password(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "change_password") {
+    handle_note_file_change_password(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "query_files") {
+    handle_note_file_query_files(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "get_file") {
+    handle_note_file_get(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "put_file") {
+    handle_note_file_put(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "delete_file") {
+    handle_note_file_delete(reply_fd, msg, client_pid);
+    return;
+  }
+
         // Unknown core message
         syslog(LOG_WARNING,
                "Unknown core message (no MODULE_ID): %s", msg_type.c_str());
@@ -1334,6 +1388,251 @@ private:
     syslog(LOG_INFO, "[Core] webrtc_offer: answer sent (%zu bytes SDP)", answer_sdp.size());
   }
 
+    // ── NoteFile / Auth management handlers ──────────────────────────────────
+
+    void handle_note_file_auth(int reply_fd, const NoteBytes::Object& msg,
+                                pid_t client_pid) {
+        auto* pass_val = msg.get(NoteBytes::Value("password"));
+        if (!pass_val) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing password field");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "File service not initialized");
+            return;
+        }
+        auto token = svc->authenticate(pass_val->as_string(), client_pid);
+        if (!token) {
+            send_error(reply_fd, NoteMessaging::ErrorCodes::UNAUTHORIZED,
+                      "Authentication failed");
+            return;
+        }
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("auth_result"));
+        response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        response.add(NoteBytes::Value("session_id"), token->session_id);
+        response.add(NoteBytes::Value("has_password"),
+                     NoteBytes::Value(svc->has_password()));
+        write_to_fd(reply_fd, response);
+        syslog(LOG_INFO, "[Auth] Client pid=%d authenticated, session=%s",
+               client_pid, token->session_id.c_str());
+    }
+
+    void handle_note_file_set_password(int reply_fd, const NoteBytes::Object& msg,
+                                        pid_t client_pid) {
+        auto* pass_val = msg.get(NoteBytes::Value("password"));
+        if (!pass_val) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing password");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Service not available");
+            return;
+        }
+        if (!svc->set_initial_password(pass_val->as_string())) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Failed to set password (may already be set)");
+            return;
+        }
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("password_set"));
+        response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        write_to_fd(reply_fd, response);
+        syslog(LOG_INFO, "[Auth] Initial password set by pid=%d", client_pid);
+    }
+
+    void handle_note_file_change_password(int reply_fd, const NoteBytes::Object& msg,
+                                           pid_t client_pid) {
+        auto* old_val = msg.get(NoteBytes::Value("old_password"));
+        auto* new_val = msg.get(NoteBytes::Value("new_password"));
+        if (!old_val || !new_val) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing old_password or new_password");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Service not available");
+            return;
+        }
+        if (!svc->change_password(old_val->as_string(), new_val->as_string())) {
+            send_error(reply_fd, NoteMessaging::ErrorCodes::UNAUTHORIZED,
+                      "Password change failed (wrong old password?)");
+            return;
+        }
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("password_changed"));
+        response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        write_to_fd(reply_fd, response);
+        syslog(LOG_INFO, "[Auth] Password changed by pid=%d", client_pid);
+    }
+
+    void handle_note_file_query_files(int reply_fd, const NoteBytes::Object& msg,
+                                       pid_t client_pid) {
+        (void)msg; (void)client_pid;
+        auto* svc = get_file_service();
+        if (!svc) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Service not available");
+            return;
+        }
+        auto files = svc->list_files();
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_list"));
+        NoteBytes::Array arr;
+        for (const auto& f : files) {
+            arr.add(NoteBytes::Value(f));
+        }
+        response.add(NoteBytes::Value("files"), arr.as_value());
+        write_to_fd(reply_fd, response);
+    }
+
+    void handle_note_file_get(int reply_fd, const NoteBytes::Object& msg,
+                               pid_t client_pid) {
+        (void)client_pid;
+        auto* path_val = msg.get(NoteBytes::Value("path"));
+        if (!path_val) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing path");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Service not available");
+            return;
+        }
+        // Parse path string into segments
+        std::string path_str = path_val->as_string();
+        std::vector<std::string> segments;
+        size_t start = 0, end;
+        while ((end = path_str.find('/', start)) != std::string::npos) {
+            if (end > start)
+                segments.push_back(path_str.substr(start, end - start));
+            start = end + 1;
+        }
+        if (start < path_str.size())
+            segments.push_back(path_str.substr(start));
+
+        auto handle = svc->get_file(segments);
+        if (!handle) {
+            send_error(reply_fd, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
+                      "File not found: " + path_str);
+            return;
+        }
+        auto obj = handle->read_object();
+        auto serialized = obj.serialize();
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_content"));
+        response.add(NoteBytes::Value("path"), NoteBytes::Value(path_str));
+        response.add(NoteBytes::Value("data"),
+                     NoteBytes::Value(serialized, NoteBytes::Type::OBJECT));
+        write_to_fd(reply_fd, response);
+    }
+
+    void handle_note_file_put(int reply_fd, const NoteBytes::Object& msg,
+                               pid_t client_pid) {
+        (void)client_pid;
+        auto* path_val = msg.get(NoteBytes::Value("path"));
+        auto* data_val = msg.get(NoteBytes::Value("data"));
+        if (!path_val || !data_val) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing path or data");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Service not available");
+            return;
+        }
+        std::string path_str = path_val->as_string();
+        std::vector<std::string> segments;
+        size_t start = 0, end;
+        while ((end = path_str.find('/', start)) != std::string::npos) {
+            if (end > start)
+                segments.push_back(path_str.substr(start, end - start));
+            start = end + 1;
+        }
+        if (start < path_str.size())
+            segments.push_back(path_str.substr(start));
+
+        auto handle = svc->get_file(segments);
+        if (!handle) {
+            send_error(reply_fd, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
+                      "Cannot create file: " + path_str);
+            return;
+        }
+        try {
+            auto obj = NoteBytes::Object::deserialize(data_val->data().data(),
+                                                       data_val->data().size());
+            if (!handle->write_object(obj)) {
+                send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                          "Failed to write file");
+                return;
+            }
+        } catch (const std::exception& e) {
+            send_error(reply_fd, NoteMessaging::ErrorCodes::PARSE_ERROR,
+                      std::string("Data parse error: ") + e.what());
+            return;
+        }
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_written"));
+        response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        response.add(NoteBytes::Value("path"), NoteBytes::Value(path_str));
+        write_to_fd(reply_fd, response);
+    }
+
+    void handle_note_file_delete(int reply_fd, const NoteBytes::Object& msg,
+                                  pid_t client_pid) {
+        (void)client_pid;
+        auto* path_val = msg.get(NoteBytes::Value("path"));
+        auto* recurse_val = msg.get(NoteBytes::Value("recursive"));
+        if (!path_val) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing path");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Service not available");
+            return;
+        }
+        std::string path_str = path_val->as_string();
+        std::vector<std::string> segments;
+        size_t start = 0, end;
+        while ((end = path_str.find('/', start)) != std::string::npos) {
+            if (end > start)
+                segments.push_back(path_str.substr(start, end - start));
+            start = end + 1;
+        }
+        if (start < path_str.size())
+            segments.push_back(path_str.substr(start));
+
+        bool recursive = recurse_val ? recurse_val->as_bool() : false;
+        std::vector<NoteBytes::Value> nb_segments;
+        for (const auto& s : segments) nb_segments.emplace_back(s);
+
+        if (!svc->delete_file(nb_segments, recursive)) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Failed to delete: " + path_str);
+            return;
+        }
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_deleted"));
+        response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        response.add(NoteBytes::Value("path"), NoteBytes::Value(path_str));
+        write_to_fd(reply_fd, response);
+    }
+
     // ── Core management handlers ─────────────────────────────────────────────
 
     void handle_hello(int reply_fd, const NoteBytes::Object& /*msg*/) {
@@ -1497,6 +1796,11 @@ private:
         AsyncLogger::Logger::log_info("SHUTDOWN-11: cleaning up core registries", "NoteDaemon");
         error_collector_.clear();
   webrtc_manager_.shutdown();
+        
+        // Shutdown file service (clears auth tokens, saves state)
+        set_file_service(nullptr);
+        file_service_.reset();
+        
         module_registry_.clear();
         ownership_registry_.clear();
         module_loader_.unload_all();

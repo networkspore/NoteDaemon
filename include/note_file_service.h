@@ -1,17 +1,26 @@
 // include/note_file_service.h
-// NoteFileService - manages encrypted file handles with path-based ledger
+// NoteFileService - encrypted file registry + auth provider
 //
 // Architecture:
-// - Files are identified by path segments (like Java NotePath)
-// - An encrypted ledger maps paths to actual file locations on disk
-// - All ledger operations are serialized via an internal executor
-// - Each file handle provides stream-based access (read/write)
-// - Encryption is transparent using the existing IEncryptionProvider
+//   Two-socket model with integrated authentication:
 //
-// Thread safety:
-// - Ledger access is serialized (only one operation at a time)
-// - File handle operations are serialized per-file
-// - Multiple files can be accessed concurrently
+//   Management socket:
+//     - Auth: AUTH (password proof) → session token + derived key
+//     - CRUD: QUERY_FILES, CLAIM_FILE, RELEASE_FILE, DELETE_FILE
+//     - Key management: CHANGE_PASSWORD
+//
+//   Data channel (Unix/TCP/WebRTC via Channel abstraction):
+//     - Stream NoteBytes reads and writes for claimed files
+//
+//   The service is initialized in main.cpp alongside WebRTCManager.
+//   Modules can access it via NoteDaemon::get_file_service().
+//
+// Auth flow:
+//   1. Client sends AUTH with password-derived proof (bcrypt)
+//   2. Service validates against stored bcrypt hash
+//   3. On success, derives AES key from password + salt (PBKDF2)
+//   4. AES key is used for transparent file encryption
+//   5. Client gets a session and access to files
 
 #ifndef NOTE_FILE_SERVICE_H
 #define NOTE_FILE_SERVICE_H
@@ -22,87 +31,121 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "note_messaging.h"
 #include "notebytes.h"
 #include "notebytes_reader.h"
 #include "notebytes_writer.h"
-
+#include "module_framework/channel.h"
 #include "module_framework/encryption_api.h"
 
 class NoteFileHandle;
 class NoteFilePath;
 
 /**
- * NoteFileConfig - Configuration for the NoteFile service.
- * Mirrors Java NoteFileConfig interface.
+ * AuthToken - session token for authenticated clients.
  */
-struct NoteFileConfig {
-    std::string data_directory;   // Directory for .dat files
-    std::string ledger_path;      // Path to the encrypted ledger file
-    std::vector<uint8_t> encryption_key; // 32-byte AES-256 key
-    std::vector<uint8_t> old_key;        // Previous key (for re-encryption)
-    
-    // Buffer sizes
-    size_t pipe_buffer_size = 65536;      // 64KB pipe buffer
-    size_t temp_buffer_limit = 8388608;   // 8MB before using temp files
+struct AuthToken {
+    std::string session_id;        // Unique session identifier
+    pid_t client_pid;               // Client process ID
+    std::vector<uint8_t> derived_key; // 32-byte AES key for file ops
+    uint64_t created_at_ms;         // Creation timestamp
+    bool valid = true;
 };
 
 /**
- * NoteFileService - Registry and manager for encrypted files.
+ * NoteFileConfig - Configuration for the file service.
+ */
+struct NoteFileConfig {
+    std::string data_directory;     // Where .dat files live
+    std::string ledger_path;        // Path to the encrypted path ledger
+    std::string settings_path;      // Path to settings.dat (auth data)
+    std::vector<uint8_t> default_encryption_key; // Fallback key (256-bit)
+    size_t pipe_buffer_size = 65536;
+};
+
+/**
+ * NoteFileService - manages encrypted files, path ledger, and auth.
  *
- * Usage:
- *   auto config = NoteFileConfig{"/path/to/data", "/path/to/ledger", key};
- *   NoteFileService service(config);
- *   
- *   // Get or create a file at path ["my", "settings"]
- *   auto handle = service.get_file({"my", "settings"});
- *   
- *   // Read the file
- *   auto obj = handle->read_object();
- *   
- *   // Write to the file
- *   handle->write_object(my_data);
+ * Core service initialised in main.cpp. Provides:
+ * - Password-based authentication
+ * - Encrypted file storage with path-based ledger
+ * - Stream-based file access over any Channel transport
+ * - Key management (password change, re-encryption)
  */
 class NoteFileService : public std::enable_shared_from_this<NoteFileService> {
 public:
-    /**
-     * Create the service with the given configuration.
-     * Does NOT initialize the ledger — call init() to set up.
-     */
     explicit NoteFileService(const NoteFileConfig& config);
-
-    /**
-     * Destructor — cleans up all handles and resources.
-     */
     ~NoteFileService();
 
-    // Non-copyable
     NoteFileService(const NoteFileService&) = delete;
     NoteFileService& operator=(const NoteFileService&) = delete;
-
-    // Movable
-    NoteFileService(NoteFileService&&) = default;
-    NoteFileService& operator=(NoteFileService&&) = default;
 
     // =========================================================================
     // INITIALIZATION
     // =========================================================================
 
     /**
-     * Initialize the service.
-     * Creates the data directory and ledger if needed.
-     * Call once before using the service.
+     * Initialise the service.
+     * Creates data directory, initialises ledger.
+     * Must be called before any other method.
      */
     bool init();
 
-    /**
-     * Check if the service is initialized.
-     */
     bool is_initialized() const { return initialized_.load(); }
+
+    // =========================================================================
+    // AUTHENTICATION
+    // =========================================================================
+
+    /**
+     * Stored auth data (from settings.dat with empty password on first boot).
+     */
+    struct AuthData {
+        std::vector<uint8_t> bcrypt_hash;  // Stored bcrypt hash
+        std::vector<uint8_t> salt;         // Salt for key derivation
+        bool has_password = false;          // Whether a password is set
+    };
+
+    /**
+     * Authenticate a client.
+     *
+     * @param password Proof string (the password) to verify
+     * @param client_pid Client process ID
+     * @return AuthToken on success, nullptr on failure
+     */
+    std::unique_ptr<AuthToken> authenticate(const std::string& password,
+                                            pid_t client_pid);
+
+    /**
+     * Set initial password (first-time setup).
+     * Creates bcrypt hash, salt, and derives the encryption key.
+     */
+    bool set_initial_password(const std::string& password);
+
+    /**
+     * Change password (requires old password verification).
+     * Derives new key, re-encrypts ledger + all files.
+     */
+    bool change_password(const std::string& old_password,
+                         const std::string& new_password);
+
+    /**
+     * Check if a password has been set.
+     */
+    bool has_password() const;
+
+    /**
+     * Invalidate a session token.
+     */
+    void invalidate_token(const std::string& session_id);
+
+    /**
+     * Get current encryption key (derived from password).
+     */
+    const std::vector<uint8_t>& encryption_key() const { return current_key_; }
 
     // =========================================================================
     // FILE OPERATIONS
@@ -111,143 +154,111 @@ public:
     /**
      * Get or create a file handle for the given path.
      *
-     * The path is an array of NoteBytes::Value segments (strings).
-     * If the file exists, returns a handle to it.
-     * If the file doesn't exist, it is created when first written to.
-     *
-     * @param path_segments Path segments (e.g., {"apps", "config", "settings"})
-     * @return Shared handle to the file, or nullptr on error
+     * @param path_segments e.g. {"apps", "config", "settings"}
+     * @return Shared handle, or nullptr on error
      */
     std::shared_ptr<NoteFileHandle> get_file(
         const std::vector<NoteBytes::Value>& path_segments);
 
-    /**
-     * Convenience: get file from string path segments.
-     */
+    /** Convenience: string-based path. */
     std::shared_ptr<NoteFileHandle> get_file(
         const std::vector<std::string>& path_segments);
 
     /**
      * Delete a file at the given path.
      *
-     * @param path_segments Path to the file to delete
-     * @param recursive If true, delete all children as well
-     * @return true if successful
+     * @param path_segments Path to delete
+     * @param recursive If true, delete all children
+     * @return true on success
      */
     bool delete_file(const std::vector<NoteBytes::Value>& path_segments,
                      bool recursive = false);
 
     /**
-     * Check if a file exists at the given path.
+     * List all file paths in the ledger.
+     */
+    std::vector<std::string> list_files();
+
+    /**
+     * Check if a file exists.
      */
     bool file_exists(const std::vector<NoteBytes::Value>& path_segments);
 
     // =========================================================================
-    // ENCRYPTION & KEY MANAGEMENT
+    // KEY MANAGEMENT
     // =========================================================================
 
     /**
-     * Update the encryption key for all files.
-     * Re-encrypts the ledger and all files with the new key.
+     * Re-encrypt all files with a new key.
      */
-    bool update_encryption_key(const std::vector<uint8_t>& new_key);
-
-    /**
-     * Verify that a password-derived key is correct.
-     */
-    bool verify_key(const std::vector<uint8_t>& key);
-
-    /**
-     * Get the current encryption key.
-     */
-    const std::vector<uint8_t>& encryption_key() const { return config_.encryption_key; }
-
-    /**
-     * Get the data directory path.
-     */
-    const std::string& data_directory() const { return config_.data_directory; }
+    bool re_encrypt_all(const std::vector<uint8_t>& new_key);
 
     // =========================================================================
-    // FILE PATH LEDGER (internal + friend access)
+    // INTERNAL (for NoteFileHandle / NoteFilePath)
     // =========================================================================
 
     /**
-     * Resolve a note path to the actual file path on disk.
-     * Creates the file entry in the ledger if it doesn't exist.
+     * Resolve a path to an actual file on disk (creates if needed).
      */
     std::string resolve_or_create_path(
         const std::vector<NoteBytes::Value>& path_segments);
 
     /**
-     * Perform decryption of a file to a pipe.
-     * Returns a file descriptor for reading decrypted content.
+     * Decrypt a file, return a pipe fd for reading plaintext.
      */
     int decrypt_file(const std::string& file_path);
 
     /**
-     * Perform encryption of a file from a pipe.
-     * Reads from the pipe, encrypts, and writes to a temp file,
-     * then atomically swaps with the original.
+     * Read from pipe, encrypt, atomically swap with original file.
      */
     bool encrypt_file_swap(const std::string& file_path, int pipe_fd);
 
     /**
-     * Encrypt data to a new file (for creation).
+     * Encrypt and write a new file.
      */
     bool encrypt_new_file(const std::string& file_path, int pipe_fd);
 
-    // =========================================================================
-    // HANDLE REGISTRY
-    // =========================================================================
-
-    /**
-     * Register a handle (called by NoteFileHandle constructor).
-     */
-    void register_handle(NoteFileHandle* handle);
-
-    /**
-     * Unregister a handle (called by NoteFileHandle destructor).
-     */
-    void unregister_handle(NoteFileHandle* handle);
-
-    /**
-     * Get number of active handles.
-     */
-    size_t active_handle_count() const;
+    /** Data directory path. */
+    const std::string& data_directory() const { return config_.data_directory; }
 
 private:
-    // =========================================================================
-    // INTERNAL
-    // =========================================================================
+    // Load/save auth data from settings file
+    bool load_auth_data();
+    bool save_auth_data();
 
-    /**
-     * Generate a new unique data file path.
-     */
-    std::string generate_data_file_path();
+    // Derive AES key from password + salt (PBKDF2-compatible)
+    std::vector<uint8_t> derive_key(const std::string& password,
+                                    const std::vector<uint8_t>& salt) const;
 
-    /**
-     * Initialize the ledger file.
-     */
-    bool init_ledger();
+    // Generate bcrypt hash
+    std::vector<uint8_t> hash_password(const std::string& password) const;
 
-    /**
-     * Serialize ledger access operations.
-     * Uses a dedicated thread for serialized ledger operations.
-     */
-    template<typename F>
-    auto execute_ledger_op(F&& func) -> decltype(func()) {
-        std::lock_guard<std::mutex> lock(ledger_mutex_);
-        return func();
-    }
+    // Verify password against bcrypt hash
+    bool verify_password(const std::string& password,
+                         const std::vector<uint8_t>& hash) const;
 
-    /**
-     * Create a pipe pair for streaming.
-     */
+    // Generate random salt
+    std::vector<uint8_t> generate_salt(size_t length = 16) const;
+
+    // Create a pipe pair
+    // NoteFileHandle is a friend and accesses this
+    friend class NoteFileHandle;
     bool create_pipe(int& read_fd, int& write_fd);
+
+    // Generate unique file path
+    std::string generate_data_file_path();
 
     NoteFileConfig config_;
     std::atomic<bool> initialized_{false};
     std::atomic<bool> shutdown_{false};
+
+    // Auth state
+    mutable std::mutex auth_mutex_;
+    AuthData auth_data_;
+    std::vector<uint8_t> current_key_;     // Current derived AES key
+    std::vector<uint8_t> old_key_;          // Previous key (during password change)
+    std::unordered_map<std::string, std::unique_ptr<AuthToken>> active_tokens_;
+    uint64_t next_session_id_ = 1;
 
     // Ledger access serialization
     mutable std::mutex ledger_mutex_;
@@ -256,8 +267,30 @@ private:
     mutable std::mutex handles_mutex_;
     std::unordered_map<std::string, std::weak_ptr<NoteFileHandle>> handles_;
 
-    // Encryption provider reference
-    NoteDaemon::IEncryptionProvider& encryption_;
+public:
+    // Handle registration (called by NoteFileHandle)
+    void register_handle(NoteFileHandle* handle);
+    void unregister_handle(NoteFileHandle* handle);
+    size_t active_handle_count() const;
+
+private:
 };
+
+// =========================================================================
+// Global accessor (initialized in main.cpp)
+// =========================================================================
+
+/**
+ * Get the global NoteFileService instance.
+ * Set by NoteDaemonApp during startup.
+ * Returns nullptr if not initialized.
+ */
+NoteFileService* get_file_service();
+
+/**
+ * Set the global NoteFileService pointer.
+ * Called once during daemon startup.
+ */
+void set_file_service(NoteFileService* service);
 
 #endif // NOTE_FILE_SERVICE_H
