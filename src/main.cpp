@@ -60,6 +60,8 @@
 #include "module_framework/config_manager.h"
 #include "module_framework/error_collector.h"
 #include "module_framework/path_resolver.h"
+#include "module_framework/channel.h"
+#include "module_framework/webrtc_manager.h"
 
 // NoteBytes I/O
 #include "notebytes.h"
@@ -326,6 +328,7 @@ private:
     ErrorCollector          error_collector_;
     CoreConfig              config_;
     ConfigManager           config_manager_;
+  WebRTCManager webrtc_manager_;
     Paths                   paths_;
     std::string             cli_root_;
 
@@ -1081,6 +1084,12 @@ private:
             return;
         }
 
+  // WEBRTC_OFFER: core-level signaling intercept
+  if (msg_type == "webrtc_offer") {
+    handle_webrtc_offer(reply_fd, msg, client_pid);
+    return;
+  }
+
         // Unknown core message
         syslog(LOG_WARNING,
                "Unknown core message (no MODULE_ID): %s", msg_type.c_str());
@@ -1277,6 +1286,54 @@ private:
         syslog(LOG_INFO, "Sent TEST_MESSAGE payload (%zu items)", items.size());
     }
 
+  // ── WebRTC signaling handler ──────────────────────────────────────────────
+  void handle_webrtc_offer(int reply_fd, const NoteBytes::Object& msg, pid_t client_pid) {
+    (void)client_pid;
+    auto* sdp_val = msg.get(NoteBytes::Value("sdp"));
+    std::string sdp = sdp_val ? sdp_val->as_string() : "";
+    auto* mid_val = msg.get(NoteBytes::Value("target_module"));
+    std::string module_id = mid_val ? mid_val->as_string() : "note_agent";
+    if (sdp.empty()) {
+      syslog(LOG_WARNING, "[Core] webrtc_offer: missing SDP");
+      send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE, "Missing SDP offer");
+      return;
+    }
+    IModule* module = module_registry_.get(module_id);
+    if (!module) {
+      syslog(LOG_WARNING, "[Core] webrtc_offer: module '%s' not found", module_id.c_str());
+      send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN, "Module not found: " + module_id);
+      return;
+    }
+    syslog(LOG_INFO, "[Core] webrtc_offer: module=%s sdp_size=%zu", module_id.c_str(), sdp.size());
+    // Set up the channel callback: when the data channel opens, route it to module
+    webrtc_manager_.set_channel_callback([this, module_id](Channel* channel, const std::string& device_id) {
+      IModule* mod = module_registry_.get(module_id);
+      if (!mod) {
+        syslog(LOG_WARNING, "[Core] WebRTC channel callback: module '%s' gone", module_id.c_str());
+        return;
+      }
+      syslog(LOG_INFO, "[Core] WebRTC data channel open -> routing to module=%s", module_id.c_str());
+      Error err = mod->handle_channel(channel, device_id);
+      if (err.failed()) {
+        syslog(LOG_ERR, "[Core] handle_channel() failed for module=%s: %s",
+          module_id.c_str(), err.message().data());
+      }
+    });
+    std::string answer_sdp = webrtc_manager_.handle_offer(sdp, module_id, module);
+    if (answer_sdp.empty()) {
+      syslog(LOG_ERR, "[Core] webrtc_offer: failed to get SDP answer");
+      send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN, "Failed to create WebRTC answer");
+      return;
+    }
+    NoteBytes::Object response;
+    response.add(NoteMessaging::Keys::CMD, NoteBytes::Value("webrtc_answer"));
+    response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+    response.add(NoteBytes::Value("sdp"), NoteBytes::Value(answer_sdp));
+    response.add(NoteBytes::Value("type"), NoteBytes::Value("answer"));
+    write_to_fd(reply_fd, response);
+    syslog(LOG_INFO, "[Core] webrtc_offer: answer sent (%zu bytes SDP)", answer_sdp.size());
+  }
+
     // ── Core management handlers ─────────────────────────────────────────────
 
     void handle_hello(int reply_fd, const NoteBytes::Object& /*msg*/) {
@@ -1439,6 +1496,7 @@ private:
         // 3) Clean up core registries and unload modules
         AsyncLogger::Logger::log_info("SHUTDOWN-11: cleaning up core registries", "NoteDaemon");
         error_collector_.clear();
+  webrtc_manager_.shutdown();
         module_registry_.clear();
         ownership_registry_.clear();
         module_loader_.unload_all();
