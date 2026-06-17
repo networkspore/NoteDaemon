@@ -310,8 +310,8 @@ public:
         {
             NoteFileConfig file_config;
             file_config.data_directory = paths_.root + "/data/files";
-            file_config.ledger_path = paths_.root + "/data/ledger.dat";
-            file_config.key_locker_path = paths_.root + "/key_locker.dat";
+            file_config.clients_registry = paths_.root + "/clients.dat";
+            // removed
             
             file_service_ = std::make_unique<NoteFileService>(file_config);
             if (file_service_->init()) {
@@ -1123,10 +1123,6 @@ private:
     handle_note_file_set_password(reply_fd, msg, client_pid);
     return;
   }
-  if (msg_type == "set_locker_pw") {
-    handle_note_file_change_password(reply_fd, msg, client_pid);
-    return;
-  }
   if (msg_type == "get_file") {
     handle_note_file_get(reply_fd, msg, client_pid);
     return;
@@ -1411,7 +1407,7 @@ private:
         response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
         response.add(NoteBytes::Value("session_id"), token->session_id);
         response.add(NoteBytes::Value("has_password"),
-                     NoteBytes::Value(svc->has_locker_password()));
+                     NoteBytes::Value(svc->has_admin_api_key()));
         write_to_fd(reply_fd, response);
         syslog(LOG_INFO, "[Auth] Client pid=%d authenticated, session=%s",
                client_pid, token->session_id.c_str());
@@ -1431,7 +1427,7 @@ private:
                       "Service not available");
             return;
         }
-        if (!svc->set_locker_password(pass_val->as_string())) {
+        if (!svc->set_admin_api_key(pass_val->as_string())) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
                       "Failed to set password (may already be set)");
             return;
@@ -1458,7 +1454,7 @@ private:
                       "Service not available");
             return;
         }
-        if (!svc->change_locker_password(old_val->as_string(), new_val->as_string())) {
+        if (!false /* removed */) {
             send_error(reply_fd, NoteMessaging::ErrorCodes::UNAUTHORIZED,
                       "Password change failed (wrong old password?)");
             return;
@@ -1479,7 +1475,7 @@ private:
                       "Service not available");
             return;
         }
-        auto files = svc->list_files("");
+        auto files = svc->list_client_files(std::string());
         NoteBytes::Object response;
         response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_list"));
         NoteBytes::Array arr;
@@ -1712,7 +1708,7 @@ private:
         return false;
     }
 
-    static std::string get_binary_directory() {
+    __attribute__((used)) static std::string get_binary_directory() {
         // Prefer /proc/self/exe on Linux
         char exe_path[4096] = {0};
         ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
@@ -1746,7 +1742,7 @@ private:
         return path;
     }
 
-    static std::string get_config_path(const std::string& binary_dir) {
+    __attribute__((used)) static std::string get_config_path(const std::string& binary_dir) {
         // Config file: same directory as the binary
         std::string path = join_path(binary_dir, "note-daemon-config");
         struct stat buf;

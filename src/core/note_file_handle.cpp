@@ -1,16 +1,12 @@
-// src/core/note_file_handle.cpp
-// NoteFileHandle implementation – per-client encryption keys
+// src/core/note_file_handle.cpp – plaintext at rest, API-key protected
 
 #include "note_file_handle.h"
 #include "note_file_service.h"
 
-#include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/syslog.h>
 #include <cstring>
-
-// ── Construction ─────────────────────────────────────────────────────────
 
 NoteFileHandle::NoteFileHandle(
     std::string file_path,
@@ -49,20 +45,17 @@ void NoteFileHandle::force_close() {
     if (auto svc = service_.lock()) svc->unregister_handle(this);
 }
 
-// ── Read / Write with per-client key ─────────────────────────────────────
-
 NoteBytes::Object NoteFileHandle::read_object() {
     if (closed_.load()) return NoteBytes::Object();
     std::lock_guard<std::mutex> lock(operation_mutex_);
     auto svc = service_.lock();
     if (!svc) return NoteBytes::Object();
-
-    auto buf = svc->read_file_to_buffer(file_path_, encryption_key_);
+    auto buf = svc->read_file_to_buffer(file_path_);
     if (buf.empty()) return NoteBytes::Object();
     try {
         return NoteBytes::Object::deserialize(buf.data(), buf.size());
     } catch (const std::exception& e) {
-        syslog(LOG_WARNING, "[NoteFileHandle] read_object parse: %s", e.what());
+        syslog(LOG_WARNING, "[NoteFileHandle] parse: %s", e.what());
         return NoteBytes::Object();
     }
 }
@@ -72,8 +65,7 @@ bool NoteFileHandle::write_object(const NoteBytes::Object& obj) {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     auto svc = service_.lock();
     if (!svc) return false;
-    auto data = obj.serialize();
-    return svc->encrypt_buffer_to_file(file_path_, data, encryption_key_);
+    return svc->write_buffer_to_file(file_path_, obj.serialize());
 }
 
 std::vector<uint8_t> NoteFileHandle::read_bytes() {
@@ -81,7 +73,7 @@ std::vector<uint8_t> NoteFileHandle::read_bytes() {
     std::lock_guard<std::mutex> lock(operation_mutex_);
     auto svc = service_.lock();
     if (!svc) return {};
-    return svc->read_file_to_buffer(file_path_, encryption_key_);
+    return svc->read_file_to_buffer(file_path_);
 }
 
 bool NoteFileHandle::write_bytes(const uint8_t* data, size_t length) {
@@ -90,5 +82,5 @@ bool NoteFileHandle::write_bytes(const uint8_t* data, size_t length) {
     auto svc = service_.lock();
     if (!svc) return false;
     std::vector<uint8_t> buf(data, data + length);
-    return svc->encrypt_buffer_to_file(file_path_, buf, encryption_key_);
+    return svc->write_buffer_to_file(file_path_, buf);
 }
