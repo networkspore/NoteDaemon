@@ -914,6 +914,25 @@ private:
         }
 
         std::string device_id = device_id_val->as_string();
+
+        // Check if this is a NoteFile stream_id (prefix "stream:")
+        if (device_id.find("stream:") == 0) {
+            std::string stream_id = device_id.substr(7);
+            syslog(LOG_INFO, "Routing device socket to file stream: %s",
+                   stream_id.c_str());
+            auto* svc = get_file_service();
+            if (svc) {
+                auto* ch = new UnixChannel(client_fd, client_pid, device_id);
+                if (!svc->route_channel(stream_id, ch)) {
+                    syslog(LOG_WARNING, "Failed to route stream: %s",
+                           stream_id.c_str());
+                }
+                delete ch;
+            }
+            safe_close(client_fd);
+            return;
+        }
+
         std::string module_id = ownership_registry_.lookup_module(device_id);
 
         if (module_id.empty()) {
@@ -1133,6 +1152,14 @@ private:
   }
   if (msg_type == "delete_file") {
     handle_note_file_delete(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "open_file_stream") {
+    handle_open_file_stream(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "close_stream") {
+    handle_close_stream(reply_fd, msg, client_pid);
     return;
   }
 
@@ -1623,6 +1650,71 @@ private:
         response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
         response.add(NoteBytes::Value("path"), NoteBytes::Value(path_str));
         write_to_fd(reply_fd, response);
+    }
+
+    // ── File stream handlers ─────────────────────────────────────────────────
+
+    void handle_open_file_stream(int reply_fd, const NoteBytes::Object& msg,
+                                  pid_t) {
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
+        auto* path_val = msg.get(NoteBytes::Value("path"));
+        auto* mode_val = msg.get(NoteBytes::Value("mode"));
+        if (!cid || !path_val || !mode_val) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing client_id, path, or mode");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) { send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                              "Service not available"); return; }
+
+        std::string mode_str = mode_val->as_string();
+        StreamMode mode = (mode_str == "write") ? StreamMode::WRITE : StreamMode::READ;
+
+        std::vector<std::string> segs;
+        std::string ps = path_val->as_string();
+        size_t s = 0, e;
+        while ((e = ps.find('/', s)) != std::string::npos) {
+            if (e > s) segs.push_back(ps.substr(s, e - s));
+            s = e + 1;
+        }
+        if (s < ps.size()) segs.push_back(ps.substr(s));
+
+        std::vector<NoteBytes::Value> nb_segs;
+        for (auto& seg : segs) nb_segs.emplace_back(seg);
+
+        auto session = svc->open_stream(cid->as_string(), nb_segs, mode);
+        if (!session) {
+            send_error(reply_fd, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
+                      "Failed to open stream");
+            return;
+        }
+
+        NoteBytes::Object resp;
+        resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("stream_opened"));
+        resp.add(NoteBytes::Value("stream_id"), session->stream_id);
+        resp.add(NoteBytes::Value("mode"), *mode_val);
+        resp.add(NoteBytes::Value("size"),
+                 NoteBytes::Value(static_cast<int64_t>(session->handle->size())));
+        write_to_fd(reply_fd, resp);
+    }
+
+    void handle_close_stream(int reply_fd, const NoteBytes::Object& msg,
+                              pid_t) {
+        auto* sid = msg.get(NoteBytes::Value("stream_id"));
+        if (!sid) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing stream_id");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) { send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                              "Service not available"); return; }
+        svc->close_stream(sid->as_string());
+        NoteBytes::Object resp;
+        resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("stream_closed"));
+        resp.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        write_to_fd(reply_fd, resp);
     }
 
     // ── Core management handlers ─────────────────────────────────────────────

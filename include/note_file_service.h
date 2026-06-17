@@ -50,6 +50,18 @@
 
 class NoteFileHandle;
 class NoteFilePath;
+namespace NoteDaemon { class Channel; }
+
+// ── Stream session – links a data Channel to a NoteFileHandle ────────────
+
+enum class StreamMode { READ, WRITE };
+
+struct StreamSession {
+    std::string stream_id;
+    std::shared_ptr<NoteFileHandle> handle;
+    StreamMode mode;
+    bool active = false;
+};
 
 // ── Client entry ─────────────────────────────────────────────────────────
 
@@ -124,6 +136,37 @@ public:
         pid_t client_pid);
     void invalidate_client_token(const std::string& session_id);
 
+    // ── Stream management ───────────────────────────────────────────────
+
+    /**
+     * Open a streaming session for a file.
+     * Returns a StreamSession with a unique stream_id.
+     * The caller then connects a Channel with that stream_id.
+     */
+    std::unique_ptr<StreamSession> open_stream(
+        const std::string& client_id,
+        const std::vector<NoteBytes::Value>& path_segments,
+        StreamMode mode);
+
+    /**
+     * Look up a stream session by stream_id.
+     * Used by the core to route an incoming Channel to the right file handle.
+     */
+    StreamSession* get_stream(const std::string& stream_id);
+
+    /**
+     * Close and remove a stream session.
+     */
+    void close_stream(const std::string& stream_id);
+
+    /**
+     * Route a Channel to an open stream session.
+     * Called when a device socket or WebRTC data channel arrives
+     * with a stream_id matching an open session.
+     */
+    bool route_channel(const std::string& stream_id,
+                       NoteDaemon::Channel* channel);
+
     // ── File operations (per-client zone) ───────────────────────────────
 
     std::shared_ptr<NoteFileHandle> get_file(
@@ -191,6 +234,10 @@ private:
 
     // Ledger access
     mutable std::mutex ledger_mutex_;
+
+    // Stream sessions
+    mutable std::mutex streams_mutex_;
+    std::unordered_map<std::string, std::unique_ptr<StreamSession>> streams_;
 
     // Handle registry
     mutable std::mutex handles_mutex_;

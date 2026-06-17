@@ -4,6 +4,7 @@
 #include "note_file_service.h"
 #include "note_file_handle.h"
 #include "note_file_path.h"
+#include "module_framework/channel.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -436,6 +437,72 @@ std::vector<std::string> NoteFileService::list_client_files(
             result.push_back(p.path().string());
     }
     return result;
+}
+
+// ── Stream management ────────────────────────────────────────────────────
+
+std::unique_ptr<StreamSession> NoteFileService::open_stream(
+    const std::string& client_id,
+    const std::vector<NoteBytes::Value>& path_segments,
+    StreamMode mode)
+{
+    auto handle = get_file(client_id, path_segments);
+    if (!handle) return nullptr;
+
+    auto session = std::make_unique<StreamSession>();
+    session->stream_id = uuid_str();
+    session->handle = handle;
+    session->mode = mode;
+
+    {
+        std::lock_guard<std::mutex> l(streams_mutex_);
+        streams_[session->stream_id] = std::move(session);
+    }
+
+    // Return a copy (the map owns the original)
+    std::lock_guard<std::mutex> l(streams_mutex_);
+    auto copy = std::make_unique<StreamSession>(*streams_[session->stream_id]);
+    syslog(LOG_INFO, "[NoteFileService] Stream opened: %s mode=%s",
+           copy->stream_id.c_str(),
+           mode == StreamMode::READ ? "READ" : "WRITE");
+    return copy;
+}
+
+StreamSession* NoteFileService::get_stream(const std::string& stream_id) {
+    std::lock_guard<std::mutex> l(streams_mutex_);
+    auto it = streams_.find(stream_id);
+    return (it != streams_.end()) ? it->second.get() : nullptr;
+}
+
+void NoteFileService::close_stream(const std::string& stream_id) {
+    std::lock_guard<std::mutex> l(streams_mutex_);
+    streams_.erase(stream_id);
+    syslog(LOG_INFO, "[NoteFileService] Stream closed: %s", stream_id.c_str());
+}
+
+bool NoteFileService::route_channel(const std::string& stream_id,
+                                     NoteDaemon::Channel* channel)
+{
+    auto* session = get_stream(stream_id);
+    if (!session || !channel) return false;
+
+    syslog(LOG_INFO, "[NoteFileService] Routing channel to stream %s",
+           stream_id.c_str());
+
+    if (session->mode == StreamMode::READ) {
+        auto rs = session->handle->open_read_stream();
+        if (rs) {
+            rs->transfer_to(channel);
+            return true;
+        }
+    } else {
+        auto ws = session->handle->open_write_stream();
+        if (ws) {
+            ws->receive_from(channel);
+            return true;
+        }
+    }
+    return false;
 }
 
 // ── Handle registry ──────────────────────────────────────────────────────
