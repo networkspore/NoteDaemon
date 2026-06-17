@@ -1,6 +1,5 @@
 // include/note_file_handle.h
-// NoteFileHandle – streamable NoteBytes with Channel-based I/O
-// Supports inline (read_object/write_object) and stream (read_stream/write_stream)
+// NoteFileHandle – streamable NoteBytes with zero-buffering Channel I/O
 
 #ifndef NOTE_FILE_HANDLE_H
 #define NOTE_FILE_HANDLE_H
@@ -14,51 +13,61 @@
 
 #include "note_messaging.h"
 #include "notebytes.h"
-#include "notebytes_reader.h"
-#include "notebytes_writer.h"
 
 class NoteFileService;
 namespace NoteDaemon { class Channel; }
 
 class NoteFileHandle : public std::enable_shared_from_this<NoteFileHandle> {
 public:
-    // ── Read stream – file data flows into a Channel ────────────────────
+    // ── Read stream – file chunks → Channel ────────────────────────────
     class ReadStream {
     public:
-        ReadStream(std::vector<uint8_t> data,
+        ReadStream(std::string file_path,
                    std::shared_ptr<NoteFileHandle> handle);
         ~ReadStream();
-        bool is_open() const { return !closed_; }
-        void transfer_to(NoteDaemon::Channel* channel);
-        void cancel();
 
+        /**
+         * Stream file content directly into `channel` in 64KB chunks.
+         * No buffering — reads from disk, writes to channel.
+         */
+        void transfer_to(NoteDaemon::Channel* channel);
+
+        void cancel();
+        bool is_open() const { return !closed_; }
     private:
-        std::vector<uint8_t> data_;
+        std::string file_path_;
         std::shared_ptr<NoteFileHandle> handle_;
         std::atomic<bool> closed_{false};
     };
 
-    // ── Write stream – data from a Channel flows into the file ──────────
+    // ── Write stream – Channel chunks → file ───────────────────────────
     class WriteStream {
     public:
-        WriteStream(std::shared_ptr<NoteFileHandle> handle);
+        WriteStream(std::string file_path,
+                    std::shared_ptr<NoteFileHandle> handle);
         ~WriteStream();
-        bool is_open() const { return !closed_; }
-        void receive_from(NoteDaemon::Channel* channel);
-        void cancel();
 
+        /**
+         * Read chunks from `channel` and write directly to a temp file.
+         * On channel close, atomically renames temp → target.
+         * No buffering — reads from channel, writes to disk.
+         */
+        void receive_from(NoteDaemon::Channel* channel);
+
+        void cancel();
+        bool is_open() const { return !closed_; }
     private:
-        std::vector<uint8_t> buffer_;
+        std::string file_path_;
         std::shared_ptr<NoteFileHandle> handle_;
         std::atomic<bool> closed_{false};
     };
 
-    // ── Public API ──────────────────────────────────────────────────────
+    // ── Public API ─────────────────────────────────────────────────────
     const std::string& id() const { return path_string_; }
     const std::vector<NoteBytes::Value>& path() const { return path_segments_; }
     const std::string& client_id() const { return client_id_; }
 
-    // Inline operations (load entire file into memory)
+    // Inline operations (entire file in memory)
     NoteBytes::Object read_object();
     bool write_object(const NoteBytes::Object& obj);
     std::vector<uint8_t> read_bytes();
@@ -67,11 +76,10 @@ public:
         return write_bytes(d.data(), d.size());
     }
 
-    // Stream operations (data flows through a Channel)
+    // Stream operations (zero-buffer, chunked)
     std::unique_ptr<ReadStream> open_read_stream();
     std::unique_ptr<WriteStream> open_write_stream();
 
-    // Metadata
     uint64_t size() const;
     bool exists() const;
     bool is_open() const { return !closed_.load(); }

@@ -486,23 +486,21 @@ bool NoteFileService::route_channel(const std::string& stream_id,
     auto* session = get_stream(stream_id);
     if (!session || !channel) return false;
 
-    syslog(LOG_INFO, "[NoteFileService] Routing channel to stream %s",
-           stream_id.c_str());
+    syslog(LOG_INFO, "[NoteFileService] Routing channel to stream %s (mode=%s)",
+           stream_id.c_str(),
+           session->mode == StreamMode::READ ? "READ" : "WRITE");
 
     if (session->mode == StreamMode::READ) {
         auto rs = session->handle->open_read_stream();
-        if (rs) {
-            rs->transfer_to(channel);
-            return true;
-        }
+        if (!rs) return false;
+        rs->transfer_to(channel);
+        return true;
     } else {
         auto ws = session->handle->open_write_stream();
-        if (ws) {
-            ws->receive_from(channel);
-            return true;
-        }
+        if (!ws) return false;
+        ws->receive_from(channel);
+        return true;
     }
-    return false;
 }
 
 // ── Handle registry ──────────────────────────────────────────────────────

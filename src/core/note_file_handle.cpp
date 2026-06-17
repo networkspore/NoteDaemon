@@ -1,12 +1,14 @@
-// src/core/note_file_handle.cpp – inline + stream-based I/O
+// src/core/note_file_handle.cpp – inline + zero-buffer stream I/O
 
 #include "note_file_handle.h"
 #include "note_file_service.h"
 
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/syslog.h>
 #include <cstring>
+#include <cstdio>
 
 // ══════════════════════════════════════════════════════════════════════════
 // NoteFileHandle
@@ -50,7 +52,7 @@ void NoteFileHandle::force_close() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Inline I/O (buffer-based)
+// Inline I/O (entire file in memory)
 // ══════════════════════════════════════════════════════════════════════════
 
 NoteBytes::Object NoteFileHandle::read_object() {
@@ -94,41 +96,51 @@ bool NoteFileHandle::write_bytes(const uint8_t* data, size_t length) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Stream I/O (Channel-based)
+// Stream I/O – zero buffering, chunked transfer
 // ══════════════════════════════════════════════════════════════════════════
 
 // ── ReadStream ───────────────────────────────────────────────────────────
 
 NoteFileHandle::ReadStream::ReadStream(
-    std::vector<uint8_t> data,
+    std::string file_path,
     std::shared_ptr<NoteFileHandle> handle)
-    : data_(std::move(data)), handle_(std::move(handle)) {}
+    : file_path_(std::move(file_path)), handle_(std::move(handle)) {}
 
 NoteFileHandle::ReadStream::~ReadStream() { cancel(); }
 
 void NoteFileHandle::ReadStream::transfer_to(NoteDaemon::Channel* channel) {
     if (closed_.exchange(true) || !channel || !channel->is_open()) return;
 
-    // Write the serialized NoteBytes data to the channel
-    // First send the size as a 4-byte big-endian header
-    uint32_t sz = static_cast<uint32_t>(data_.size());
-    uint8_t hdr[4];
-    hdr[0] = (sz >> 24) & 0xFF;
-    hdr[1] = (sz >> 16) & 0xFF;
-    hdr[2] = (sz >> 8) & 0xFF;
-    hdr[3] = sz & 0xFF;
-
-    ssize_t written = channel->write(hdr, 4);
-    if (written < 4) return;  // write failed
-
-    size_t offset = 0;
-    while (offset < data_.size()) {
-        ssize_t n = channel->write(data_.data() + offset, data_.size() - offset);
-        if (n <= 0) break;
-        offset += n;
+    int fd = ::open(file_path_.c_str(), O_RDONLY);
+    if (fd < 0) {
+        syslog(LOG_WARNING, "[ReadStream] Cannot open %s: %s",
+               file_path_.c_str(), strerror(errno));
+        return;
     }
 
-    syslog(LOG_DEBUG, "[ReadStream] Transferred %zu bytes to channel", data_.size());
+    uint8_t buf[65536];  // 64KB chunks – no heap allocation per chunk
+    ssize_t n;
+    uint64_t total = 0;
+
+    while ((n = ::read(fd, buf, sizeof(buf))) > 0) {
+        if (closed_.load()) break;
+        size_t offset = 0;
+        while (offset < static_cast<size_t>(n)) {
+            ssize_t written = channel->write(buf + offset, n - offset);
+            if (written <= 0) {
+                syslog(LOG_WARNING, "[ReadStream] channel write failed at %llu",
+                       (unsigned long long)total);
+                ::close(fd);
+                return;
+            }
+            offset += written;
+            total += written;
+        }
+    }
+
+    ::close(fd);
+    syslog(LOG_DEBUG, "[ReadStream] Streamed %llu bytes from %s",
+           (unsigned long long)total, file_path_.c_str());
 }
 
 void NoteFileHandle::ReadStream::cancel() {
@@ -138,45 +150,56 @@ void NoteFileHandle::ReadStream::cancel() {
 // ── WriteStream ──────────────────────────────────────────────────────────
 
 NoteFileHandle::WriteStream::WriteStream(
+    std::string file_path,
     std::shared_ptr<NoteFileHandle> handle)
-    : handle_(std::move(handle)) {}
+    : file_path_(std::move(file_path)), handle_(std::move(handle)) {}
 
 NoteFileHandle::WriteStream::~WriteStream() { cancel(); }
 
 void NoteFileHandle::WriteStream::receive_from(NoteDaemon::Channel* channel) {
     if (closed_.exchange(true) || !channel || !channel->is_open()) return;
 
-    // Read the 4-byte size header
-    uint8_t hdr[4];
-    ssize_t n = channel->read(hdr, 4);
-    if (n < 4) return;
-
-    uint32_t sz = (static_cast<uint32_t>(hdr[0]) << 24) |
-                  (static_cast<uint32_t>(hdr[1]) << 16) |
-                  (static_cast<uint32_t>(hdr[2]) << 8) |
-                  static_cast<uint32_t>(hdr[3]);
-
-    if (sz > 100 * 1024 * 1024) {  // sanity cap: 100MB
-        syslog(LOG_WARNING, "[WriteStream] Rejecting oversized write: %u bytes", sz);
+    // Write to temp file, atomically rename on completion
+    std::string tmp_path = file_path_ + ".stream";
+    int fd = ::open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) {
+        syslog(LOG_WARNING, "[WriteStream] Cannot create %s: %s",
+               tmp_path.c_str(), strerror(errno));
         return;
     }
 
-    buffer_.resize(sz);
-    size_t offset = 0;
-    while (offset < sz) {
-        ssize_t r = channel->read(buffer_.data() + offset, sz - offset);
-        if (r <= 0) break;
-        offset += r;
-    }
-    buffer_.resize(offset);
+    uint8_t buf[65536];  // 64KB chunks
+    ssize_t n;
+    uint64_t total = 0;
 
-    // Write to file (WriteStream is nested inside NoteFileHandle,
-    // so it can access private members of the handle)
-    if (auto svc = handle_ ? handle_->service_.lock() : nullptr) {
-        svc->write_buffer_to_file(handle_->file_path_, buffer_);
+    while ((n = channel->read(buf, sizeof(buf))) > 0) {
+        if (closed_.load()) break;
+        size_t offset = 0;
+        while (offset < static_cast<size_t>(n)) {
+            ssize_t written = ::write(fd, buf + offset, n - offset);
+            if (written <= 0) {
+                syslog(LOG_WARNING, "[WriteStream] file write failed at %llu",
+                       (unsigned long long)total);
+                ::close(fd);
+                unlink(tmp_path.c_str());
+                return;
+            }
+            offset += written;
+            total += written;
+        }
     }
 
-    syslog(LOG_DEBUG, "[WriteStream] Received %zu bytes from channel", buffer_.size());
+    ::close(fd);
+
+    // Atomically replace target
+    if (rename(tmp_path.c_str(), file_path_.c_str()) != 0) {
+        syslog(LOG_ERR, "[WriteStream] rename failed: %s", strerror(errno));
+        unlink(tmp_path.c_str());
+        return;
+    }
+
+    syslog(LOG_DEBUG, "[WriteStream] Received %llu bytes to %s",
+           (unsigned long long)total, file_path_.c_str());
 }
 
 void NoteFileHandle::WriteStream::cancel() {
@@ -189,14 +212,11 @@ void NoteFileHandle::WriteStream::cancel() {
 
 std::unique_ptr<NoteFileHandle::ReadStream> NoteFileHandle::open_read_stream() {
     if (closed_.load()) return nullptr;
-    auto svc = service_.lock();
-    if (!svc) return nullptr;
-    auto data = svc->read_file_to_buffer(file_path_);
-    if (data.empty() && !exists()) return nullptr;
-    return std::make_unique<ReadStream>(std::move(data), shared_from_this());
+    if (!exists()) return nullptr;  // nothing to stream
+    return std::make_unique<ReadStream>(file_path_, shared_from_this());
 }
 
 std::unique_ptr<NoteFileHandle::WriteStream> NoteFileHandle::open_write_stream() {
     if (closed_.load()) return nullptr;
-    return std::make_unique<WriteStream>(shared_from_this());
+    return std::make_unique<WriteStream>(file_path_, shared_from_this());
 }
