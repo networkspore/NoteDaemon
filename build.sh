@@ -19,11 +19,14 @@ NOTEREMOTE_DIR_ABS="$SCRIPT_DIR/$NOTEREMOTE_DIR"
 NOTEREMOTE_BUILD_DIR_ABS="$NOTEREMOTE_DIR_ABS/$NOTEREMOTE_BUILD_DIR"
 
 INSTALL=false
-SKIP_USB=false
+SKIP_USB=true              # USB is opt-in: use --noteUSB to enable
+BUILD_USB=false
 BUILD_REMOTE=false
+BUILD_ADMIN=false           # note_admin tool is opt-in: use --noteAdmin
 CLEAN=false
 SETUP_TCP=false
 FULL_INSTALL=false
+ADMIN_KEY=""
 JOBS=$(nproc)
 
 SERVICE_NAME="note-daemon.service"
@@ -81,6 +84,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-usb)
             SKIP_USB=true
+            BUILD_USB=false
+            ;;
+        --noteUSB)
+            SKIP_USB=false
+            BUILD_USB=true
+            ;;
+        --noteAdmin)
+            BUILD_ADMIN=true
+            ;;
+        --admin-key)
+            ADMIN_KEY="$2"
+            shift
             ;;
         --remote)
             BUILD_REMOTE=true
@@ -93,7 +108,10 @@ while [[ $# -gt 0 ]]; do
             # Full install: clean, build everything, install, setup TCP
             CLEAN=true
             INSTALL=true
+            BUILD_USB=true
+            SKIP_USB=false
             BUILD_REMOTE=true
+            BUILD_ADMIN=true
             SETUP_TCP=true
             ;;
         *)
@@ -105,16 +123,20 @@ while [[ $# -gt 0 ]]; do
             echo "  --clean|-c      Clean build directories"
             echo "  --debug|-d      Debug build"
             echo "  --release|-r    Release build (default)"
-            echo "  --skip-usb      Skip NoteUSB module"
+            echo "  --skip-usb      Skip NoteUSB (default; use --noteUSB to enable)"
+            echo "  --noteUSB       Build + install NoteUSB module"
+            echo "  --noteAdmin     Compile + install note_admin CLI tool"
+            echo "  --admin-key <k> Admin API key (passed to setup-netnotes)"
             echo "  --remote        Build NoteRemote module (display + input)"
             echo "  --tcp           Configure for TCP transport (requires --install)"
-            echo "  --full          Full install: --clean --install --remote --tcp"
+            echo "  --full          Full install: --clean --install --noteUSB --noteAdmin --remote --tcp"
             echo ""
             echo "Examples:"
-            echo "  ./build.sh                    # Build only"
-            echo "  ./build.sh --install          # Build and install"
-            echo "  ./build.sh --full             # Clean, build all, install, setup TCP"
-            echo "  ./build.sh --remote --tcp     # Build remote module with TCP"
+            echo "  ./build.sh                                    # Build only"
+            echo "  ./build.sh --install                          # Build + install core"
+            echo "  ./build.sh --install --noteUSB --noteAdmin    # Core + USB + admin tool"
+            echo "  ./build.sh --install --admin-key my-key       # Install + set admin key"
+            echo "  ./build.sh --full --admin-key my-key          # Everything + admin key"
             exit 1
             ;;
     esac
@@ -501,6 +523,17 @@ TCPEOF
         echo "    Config: /etc/netnotes/note-daemon-config.tcp"
     fi
 
+    # Compile and install C admin tool (only with --noteAdmin)
+    if [ "$BUILD_ADMIN" = true ]; then
+        echo "[*] Compiling note_admin admin tool..."
+        if [ -f "$SCRIPT_DIR/tools/note_admin.c" ]; then
+            gcc -o "$BUILD_DIR_ABS/note_admin" "$SCRIPT_DIR/tools/note_admin.c" -Wall -Wno-unused 2>/dev/null && \
+                $ELEV cp "$BUILD_DIR_ABS/note_admin" /etc/netnotes/note_admin && \
+                echo "[✓] note_admin installed to /etc/netnotes/note_admin" || \
+                echo "[!] note_admin compilation failed (non-critical)"
+        fi
+    fi
+
     # Restart service
     echo "[*] Restarting systemd service: $SERVICE_NAME"
     if systemctl list-unit-files --type=service | grep -q "$SERVICE_NAME"; then
@@ -511,6 +544,23 @@ TCPEOF
         if systemctl is-active --quiet "$SERVICE_NAME"; then
             $ELEV systemctl status "$SERVICE_NAME" --no-pager || true
             echo "[✓] $SERVICE_NAME restarted successfully!"
+
+            # Run setup-netnotes.sh (core daemon config, admin key)
+            if [ -f "$SCRIPT_DIR/setup-netnotes.sh" ]; then
+                echo ""
+                echo "[*] Running setup-netnotes.sh (auto-configure)..."
+                local setup_args="--auto"
+                [ -n "$ADMIN_KEY" ] && setup_args="$setup_args --admin-key $ADMIN_KEY"
+                [ "$BUILD_ADMIN" = true ] && setup_args="$setup_args --skip-build"
+                $ELEV bash "$SCRIPT_DIR/setup-netnotes.sh" $setup_args || true
+            fi
+
+            # Run setup-noteusb.sh only when --noteUSB was used
+            if [ "$BUILD_USB" = true ] && [ -f "$SCRIPT_DIR/setup-noteusb.sh" ]; then
+                echo ""
+                echo "[*] Running setup-noteusb.sh (auto-configure)..."
+                $ELEV bash "$SCRIPT_DIR/setup-noteusb.sh" --auto || true
+            fi
         else
             echo "[!] $SERVICE_NAME failed to start. Check logs with:"
             echo "    $ELEV journalctl -u $SERVICE_NAME -n 50"

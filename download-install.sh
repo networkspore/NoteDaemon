@@ -1,251 +1,131 @@
 #!/usr/bin/env bash
-# NoteDaemon Installation Script
-# This script downloads, builds, and installs the NoteDaemon system
-# Usage: sudo ./install-notedaemon.sh
+# ============================================================
+# download-install.sh — One-Shot NoteDaemon Download + Install
+# ============================================================
+#
+# Downloads the latest NoteDaemon release tarball, builds from
+# source, and runs the setup scripts.
+#
+# Usage:
+#   sudo ./download-install.sh
+#   sudo ./download-install.sh --admin-key <key>
+#   sudo ./download-install.sh --admin-key <key> --noteUSB --noteAdmin
+# ============================================================
+
 set -e
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+print_status()  { echo -e "${BLUE}[*]${NC} $1"; }
+print_success() { echo -e "${GREEN}[✓]${NC} $1"; }
+print_error()   { echo -e "${RED}[✗]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 
-# Configuration
-REPO_URL="https://github.com/networkspore/NoteDaemon/archive/refs/tags/v1.0.0-beta.2.tar.gz"
-TAG_VERSION="v1.0.0-beta.2"
+REPO_URL="https://github.com/networkspore/NoteDaemon/archive/refs/heads/master.tar.gz"
 WORK_DIR="/tmp/notedaemon-install"
-EXTRACTED_DIR="NoteDaemon"
+EXTRACTED_DIR="NoteDaemon-master"
 
-# Functions
-print_status() {
-    echo -e "${BLUE}[*]${NC} $1"
-}
-
-print_success() {
-    echo -e "${GREEN}[✓]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[✗]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[!]${NC} $1"
-}
+ADMIN_KEY=""
+BUILD_USB=false
+BUILD_ADMIN=false
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        print_error "This script must be run as root (use sudo)"
+        print_error "Must run as root (use sudo)"
         exit 1
     fi
 }
 
-get_sudo_user() {
-    if [[ -n "$SUDO_USER" ]]; then
-        echo "$SUDO_USER"
-    else
-        echo "$USER"
-    fi
-}
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --admin-key) ADMIN_KEY="$2"; shift 2 ;;
+        --noteUSB)   BUILD_USB=true; shift ;;
+        --noteAdmin) BUILD_ADMIN=true; shift ;;
+        --help|-h)
+            echo "Usage: sudo $0 [OPTIONS]"
+            echo "  --admin-key <k>  Set admin API key"
+            echo "  --noteUSB        Build + install NoteUSB module"
+            echo "  --noteAdmin      Build + install note_admin CLI"
+            exit 0 ;;
+        *) echo "Unknown: $1"; exit 1 ;;
+    esac
+done
 
-# Main installation process
 main() {
     check_root
-    
-    CALLING_USER=$(get_sudo_user)
-    print_status "Installation started by user: $CALLING_USER"
-    
-    # Step 1: Update and install dependencies
-    print_status "Updating package list..."
+
+    echo ""
+    echo "============================================"
+    echo "  NoteDaemon Download + Install"
+    echo "============================================"
+    echo ""
+
+    # ── 1. Install build deps ───────────────────────────────
+
+    print_status "Installing build dependencies..."
     apt-get update -qq
-    
-    print_status "Installing required packages..."
-    apt-get install -y \
-        build-essential \
-        cmake \
-        pkg-config \
-        libusb-1.0-0-dev \
-        libssl-dev \
-        libboost-all-dev \
-        wget \
-        tar
-    
+    apt-get install -y --no-install-recommends \
+        build-essential cmake pkg-config \
+        libusb-1.0-0-dev libssl-dev libboost-all-dev \
+        wget tar
     print_success "Dependencies installed"
-    
-    # Step 2: Download source code
-    print_status "Creating working directory: $WORK_DIR"
+
+    # ── 2. Download ─────────────────────────────────────────
+
+    print_status "Downloading NoteDaemon (master)..."
     rm -rf "$WORK_DIR"
     mkdir -p "$WORK_DIR"
     cd "$WORK_DIR"
-    
-    print_status "Downloading NoteDaemon $TAG_VERSION..."
     wget -q --show-progress "$REPO_URL" -O notedaemon.tar.gz
-    print_success "Download complete"
-    
-    # Step 3: Extract archive
-    print_status "Extracting archive..."
+    print_success "Downloaded"
+
+    # ── 3. Extract ──────────────────────────────────────────
+
+    print_status "Extracting..."
     tar -xzf notedaemon.tar.gz
     cd "$EXTRACTED_DIR"
-    print_success "Extraction complete"
-    
-    # Step 4: Create netnotes group and user
-    print_status "Setting up netnotes system user and group..."
-    if ! getent group netnotes >/dev/null; then
-        groupadd --system netnotes
-        print_success "Created netnotes group"
-    else
-        print_warning "Group netnotes already exists"
-    fi
-    
-    if ! id netnotes >/dev/null 2>&1; then
-        useradd --system --no-create-home --home-dir /var/lib/netnotes \
-                -g netnotes --shell /usr/sbin/nologin netnotes
-        print_success "Created netnotes user"
-    else
-        print_warning "User netnotes already exists"
-    fi
-    
-    # Step 5: Create runtime/data directories
-    print_status "Creating runtime directories..."
-    mkdir -p /var/lib/netnotes /run/netnotes
-    chown netnotes:netnotes /var/lib/netnotes /run/netnotes
-    chmod 0750 /var/lib/netnotes /run/netnotes
-    print_success "Runtime directories created"
-    
-    # Step 6: Build the project
-    print_status "Building NoteDaemon..."
-    mkdir -p build
-    cd build
-    cmake -DCMAKE_BUILD_TYPE=Release .. > /dev/null
-    make -j$(nproc)
-    print_success "Build complete"
-    
-    # Step 7: Install binary
-    print_status "Installing note-daemon binary..."
-    install -m 0755 -o root -g netnotes note-daemon /etc/netnotes/note-daemon
-    print_success "Binary installed to /etc/netnotes/note-daemon"
-    
-    # Step 8: Install udev rules
-    cd ..
-    print_status "Installing udev rules..."
-    cp 99-netnotes.rules /etc/udev/rules.d/99-netnotes.rules
-    chmod 0644 /etc/udev/rules.d/99-netnotes.rules
-    print_success "Udev rules installed"
-    
-    # Step 9: Reload udev rules without restarting
-    print_status "Reloading udev rules..."
-    udevadm control --reload-rules
-    udevadm trigger
-    print_success "Udev rules reloaded"
-    
-    # Step 10: Install systemd service
-    print_status "Installing systemd service..."
-    cp note-daemon.service /etc/systemd/system/note-daemon.service
-    chmod 0644 /etc/systemd/system/note-daemon.service
-    systemctl daemon-reload
-    print_success "Systemd service installed"
-    
-    # Step 11: Apply group membership without restart
-    print_status "Applying group memberships..."
-    # Force nscd to refresh if it's running
-    if command -v nscd >/dev/null 2>&1; then
-        nscd -i group 2>/dev/null || true
-    fi
-    # Force sssd to refresh if it's running
-    if command -v sss_cache >/dev/null 2>&1; then
-        sss_cache -G 2>/dev/null || true
-    fi
-    print_success "Group cache refreshed"
-    
-    # Step 12: Enable and start service
-    print_status "Enabling and starting note-daemon service..."
-    systemctl enable note-daemon.service
-    systemctl start note-daemon.service
-    sleep 5
-    
-    if systemctl is-active --quiet note-daemon.service; then
-        print_success "Service started successfully"
-        systemctl status note-daemon.service --no-pager | head -10
-    else
-        print_error "Service failed"
-        systemctl status note-daemon.service --no-pager || true
-    fi
-    
-    # Step 13: User group management
+    print_success "Extracted → $WORK_DIR/$EXTRACTED_DIR"
+
+    # ── 4. Build + Install ─────────────────────────────────
+
+    BUILD_ARGS="--install"
+    [ "$BUILD_USB" = true ] && BUILD_ARGS="$BUILD_ARGS --noteUSB"
+    [ "$BUILD_ADMIN" = true ] && BUILD_ARGS="$BUILD_ARGS --noteAdmin"
+    [ -n "$ADMIN_KEY" ] && BUILD_ARGS="$BUILD_ARGS --admin-key $ADMIN_KEY"
+
+    print_status "Building + Installing..."
+    print_status "Flags: $BUILD_ARGS"
+
+    bash build.sh $BUILD_ARGS
+
+    # ── 5. Cleanup ─────────────────────────────────────────
+
     echo ""
-    echo "============================================"
-    print_status "User Group Configuration"
-    echo "============================================"
-    echo ""
-    
-    # Ask about adding the calling user
-    if [[ "$CALLING_USER" != "root" ]]; then
-        read -p "Add user '$CALLING_USER' to the netnotes group? [Y/n]: " add_calling_user
-        add_calling_user=${add_calling_user:-Y}
-        
-        if [[ "$add_calling_user" =~ ^[Yy]$ ]]; then
-            usermod -a -G netnotes "$CALLING_USER"
-            print_success "User '$CALLING_USER' added to netnotes group"
-            print_warning "User '$CALLING_USER' must log out and back in for group membership to take effect"
-            
-            # Provide immediate access command
-            echo ""
-            print_status "To apply group membership immediately in current shell, run:"
-            echo -e "${GREEN}    newgrp netnotes${NC}"
-        fi
-    fi
-    
-    # Ask about adding another user
-    echo ""
-    read -p "Add another user to the netnotes group (for client app)? [y/N]: " add_another
-    add_another=${add_another:-N}
-    
-    if [[ "$add_another" =~ ^[Yy]$ ]]; then
-        read -p "Enter username to add: " username
-        if id "$username" >/dev/null 2>&1; then
-            usermod -a -G netnotes "$username"
-            print_success "User '$username' added to netnotes group"
-            print_warning "User '$username' must log out and back in for group membership to take effect"
-        else
-            print_error "User '$username' does not exist"
-        fi
-    fi
-    newgrp netnotes
-    # Step 14: Cleanup
-    echo ""
-    print_status "Cleaning up temporary files..."
+    print_status "Cleaning up..."
     cd /
     rm -rf "$WORK_DIR"
-    print_success "Cleanup complete"
-    
-    # Final summary
+    print_success "Temp files removed"
+
+    # ── 6. Summary ─────────────────────────────────────────
+
     echo ""
     echo "============================================"
-    print_success "NoteDaemon Installation Complete!"
+    print_success "Installation Complete!"
     echo "============================================"
     echo ""
-    echo "Installation Summary:"
-    echo "  • Binary:         /etc/netnotes/note-daemon"
-    echo "  • Service:        note-daemon.service"
-    echo "  • Udev Rules:     /etc/udev/rules.d/99-netnotes.rules"
-    echo "  • User/Group:     netnotes:netnotes"
-    echo "  • Data Directory: /var/lib/netnotes"
+    echo "  Binary:     /etc/netnotes/note-daemon"
+    echo "  Service:    note-daemon.service"
+    echo "  Admin tool: /etc/netnotes/note_admin"
     echo ""
-    echo "Service Status:"
-    if systemctl is-active --quiet note-daemon.service; then
-        echo -e "  ${GREEN}● Running${NC}"
-    else
-        echo -e "  ${RED}● Stopped${NC}"
+    echo "Commands:"
+    echo "  systemctl status note-daemon"
+    echo "  journalctl -u note-daemon -f"
+    if [ -x /etc/netnotes/note_admin ]; then
+        echo "  /etc/netnotes/note_admin ping"
+        echo "  /etc/netnotes/note_admin list-clients"
     fi
-    echo ""
-    echo "Useful Commands:"
-    echo "  • Check status:   systemctl status note-daemon"
-    echo "  • View logs:      journalctl -u note-daemon -f"
-    echo "  • Restart:        systemctl restart note-daemon"
-    echo "  • Stop:           systemctl stop note-daemon"
-    echo ""
+    if [ "$BUILD_USB" = true ]; then
+        echo "  ls -l /dev/hidraw*"
+    fi
 }
 
-# Run main function
 main "$@"
