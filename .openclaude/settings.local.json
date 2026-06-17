@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake ..)",
+      "Bash(make -j4)",
+      "Bash(./tests/note-daemon-tests 2>&1)",
+      "Bash(./tests/note-daemon-tests --gtest_filter=\"*HIDDeviceStreamingThread*\" 2>&1)",
+      "Bash(timeout 10 ./tests/note-daemon-tests --gtest_filter=\"*BackpressureFlagSet*\")",
+      "Bash(./tests/note-daemon-tests --gtest_filter=\"*DeviceSessionTest*\" 2>&1)",
+      "Bash(./tests/note-daemon-tests --gtest_filter=\"*ErrorHandling*\" 2>&1)"
+    ]
+  }
+}

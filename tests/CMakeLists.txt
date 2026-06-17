@@ -23,7 +23,7 @@ FetchContent_MakeAvailable(googletest)
 
 # Test sources
 set(TEST_SOURCES
-    test_main.cpp
+    # test_main.cpp removed (gtest_main provides main)
     ../src/keyboard_capture_lowlatency.cpp
     # Core framework sources needed for tests
     ../src/core/module_registry.cpp
@@ -55,13 +55,20 @@ list(APPEND TEST_SOURCES hid_parser_test.cpp)
 # Add notebytes test
 list(APPEND TEST_SOURCES notebytes_test.cpp)
 
-# Add notefile test (encrypted file storage + auth)
-list(APPEND TEST_SOURCES
+# note_file_test.cpp is standalone (has own main) — separate executable
+add_executable(note-file-test
     ../src/core/note_file_service.cpp
     ../src/core/note_file_handle.cpp
     ../src/core/note_file_path.cpp
     note_file_test.cpp
 )
+target_include_directories(note-file-test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/module_framework
+    ${CMAKE_SOURCE_DIR}/src
+    ${googletest_SOURCE_DIR}/googletest/include
+)
+target_link_libraries(note-file-test PRIVATE ssl crypto pthread)
 
 # Create test executable
 add_executable(note-daemon-tests ${TEST_SOURCES})
