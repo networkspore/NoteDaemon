@@ -64,21 +64,39 @@ has the keys, so encryption doesn't add real security. Instead:
 
 ### Management Socket Handlers
 
-| Message              | Purpose                                    |
-|----------------------|--------------------------------------------|
-| `admin_auth`         | Authenticate with admin API key            |
-| `set_admin_api_key`  | Set initial admin API key (first boot)    |
-| `add_client`         | Register new client with API key           |
-| `remove_client`      | Remove a client and their data             |
-| `list_clients`       | List all registered clients                |
-| `client_auth`        | Authenticate as a client to get a session  |
-| `get_file`           | Read a NoteFile for a client               |
-| `put_file`           | Write a NoteFile for a client              |
-| `delete_file`        | Delete a NoteFile for a client             |
+| Message              | Purpose                                              |
+|----------------------|------------------------------------------------------|
+| `set_admin_api_key`  | Set admin API key (first boot, one-time)             |
+| `admin_auth`         | Authenticate as admin                                |
+| `add_client`         | Create a new client with their API key               |
+| `remove_client`      | Remove a client and all their data                   |
+| `list_clients`       | List all client IDs                                  |
+| `client_auth`        | Authenticate as a client                             |
+| `get_file`           | Read a file (inline, small data)                     |
+| `put_file`           | Write a file (inline, small data)                    |
+| `delete_file`        | Delete a file                                        |
+| `open_file_stream`   | Open a streaming session (large data, any transport) |
+| `close_stream`       | Close a streaming session                            |
+
+### File Access — Two Options
+
+**Inline** (management socket, single round-trip):
+```
+put_file  {client_id, path, data}  →  file_written
+```
+Use for configs, settings, small objects (<1MB).
+
+**Stream** (data channel, zero buffering):
+```
+open_file_stream {client_id, path, mode} → stream_opened
+→ connect device socket with "stream:<client_id>:<id>"
+→ data flows in 64KB chunks
+```
+Use for large files, real-time data, WebRTC transport.
 
 ### Protocol
 
-Uses the Netnotes binary object model:
+Full protocol specification with examples:
 [NoteBytes Wire Protocol Format](protocol_wire_format.md)
 
 ### Modules

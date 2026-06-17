@@ -249,77 +249,226 @@ This means the encryption is **transparent** to the protocol structure.
 
 ## NoteFile Service Protocol
 
-The NoteFile service uses the management socket for control operations.
-Messages follow the standard OBJECT format with string keys.
+### Authentication Model
 
-### Admin Authentication
-
-```
-→ { "event": "admin_auth", "api_key": "admin-secret-123" }
-← { "event": "admin_auth_result", "status": "ok", "session_id": "..." }
-```
-
-### Client Management (admin only)
+The NoteFile service uses a **two-tier API key system**:
 
 ```
-→ { "event": "add_client", "client_id": "alice",
-     "api_key": "alice-client-key" }
-← { "event": "client_added", "status": "ok" }
-
-→ { "event": "remove_client", "client_id": "alice" }
-← { "event": "client_removed", "status": "ok" }
-
-→ { "event": "list_clients" }
-← { "event": "client_list", "clients": ["alice", "bob"] }
+/var/netnotes/data/
+├── clients/
+│   ├── alice/
+│   │   ├── .auth         ← hash of alice's API key
+│   │   ├── .ledger       ← path mapping ledger
+│   │   ├── a1b2...dat    ← actual files
+│   │   └── c3d4...dat
+│   └── bob/
+│       └── ...
 ```
 
-### Client Authentication
+**Admin API key** (`/etc/netnotes/admin.key`):
+- Set on first boot via `set_admin_api_key`
+- Used to manage clients: `add_client`, `remove_client`, `list_clients`
+- One-time setup — stored as SHA-256 hash with random salt
+
+**Client API keys** (`data/clients/<id>/.auth`):
+- Created by admin via `add_client {client_id, api_key}`
+- Each client gets their own directory (zone)
+- Authentication is per-client: `client_auth {client_id, api_key}`
+- No central registry — client existence IS directory existence
+
+---
+
+### Lifecycle: Setup → Auth → File Ops
 
 ```
-→ { "event": "client_auth", "client_id": "alice",
-     "api_key": "alice-client-key" }
-← { "event": "client_auth_result", "status": "ok",
-     "session_id": "..." }
+── FIRST BOOT ─────────────────────────────────────────────────────
+
+Admin setup (once):
+  → set_admin_api_key {api_key: "sk-admin-..."}
+  ← {event: "admin_api_key_set", status: "ok"}
+
+Create clients:
+  → admin_auth {api_key: "sk-admin-..."}
+  ← {event: "admin_auth_result", session_id: "..."}
+
+  → add_client {client_id: "alice", api_key: "sk-alice-..."}
+  ← {event: "client_added", status: "ok"}
+  → add_client {client_id: "bob",   api_key: "sk-bob-..."}
+  ← {event: "client_added", status: "ok"}
+
+── CLIENT OPERATIONS ──────────────────────────────────────────────
+
+Client authenticates:
+  → client_auth {client_id: "alice", api_key: "sk-alice-..."}
+  ← {event: "client_auth_result", status: "ok", session_id: "..."}
+
+Now the client can access files in their zone (data/clients/alice/*).
 ```
 
-### File Operations (per-client)
+---
 
-Paths are hierarchical arrays of string segments.
-Files are NoteBytes::Object values stored at the resolved path.
+### Inline File Operations (Management Socket)
+
+For small files (configs, settings, small objects).
+The entire NoteBytes::Object is serialized inline in one round-trip.
+
+**Write a file:**
+```
+→ {event: "put_file", client_id: "alice",
+     path: "apps/config/settings",
+     data: <NoteBytes::Object serialized>}
+← {event: "file_written", status: "ok"}
+```
+
+The server:
+1. Resolves `apps/config/settings` in alice's ledger → finds/creates `uuid.dat`
+2. Writes the Object bytes directly to `data/clients/alice/uuid.dat`
+3. Returns success
+
+**Read a file:**
+```
+→ {event: "get_file", client_id: "alice",
+     path: "apps/config/settings"}
+← {event: "file_content", client_id: "alice",
+     path: "apps/config/settings",
+     data: <NoteBytes::Object serialized>}
+```
+
+The server:
+1. Resolves path in alice's ledger → finds `uuid.dat`
+2. Reads entire file into buffer
+3. Sends the buffer as the `data` field
+
+**Delete:**
+```
+→ {event: "delete_file", client_id: "alice",
+     path: "apps/config/settings"}
+← {event: "file_deleted", status: "ok"}
+```
+
+**When to use inline:**
+- Config files (< 1MB)
+- Small NoteBytes objects
+- Simple request/response patterns
+- Single round-trip, no extra connection needed
+
+---
+
+### Streaming File Operations (Data Channel)
+
+For large files, real-time data, or WebRTC transport.
+The data flows over a separate **Channel** (Unix socket, TCP, or WebRTC data channel).
+
+The stream protocol:
+1. Client opens a stream on the management socket → gets a `stream_id`
+2. Client connects a **device socket** with `stream:<client_id>:<stream_id>` as the device_id
+3. Data flows over that socket in 64KB chunks with a 4-byte length prefix
+
+#### Step 1: Open Stream (Management Socket)
 
 ```
-→ { "event": "get_file", "client_id": "alice",
-     "path": "apps/config/settings" }
-← { "event": "file_content", "client_id": "alice",
-     "path": "apps/config/settings",
-     "data": <OBJECT bytes> }
-
-→ { "event": "put_file", "client_id": "alice",
-     "path": "apps/config/settings",
-     "data": <OBJECT bytes> }
-← { "event": "file_written", "status": "ok" }
-
-→ { "event": "delete_file", "client_id": "alice",
-     "path": "apps/config/settings" }
-← { "event": "file_deleted", "status": "ok" }
+→ {event: "open_file_stream", client_id: "alice",
+     path: "videos/demo.mp4", mode: "write"}
+← {event: "stream_opened",
+     stream_id: "alice:7f9a8b2c-1d3e-4f5a-6b7c-8d9e0f1a2b3c",
+     mode: "write",
+     size: 0}
 ```
+
+The `stream_id` in the response is `"alice:7f9a..."` — it embeds the
+client_id so the data channel can verify the client owns the stream.
+
+#### Step 2: Connect Data Channel (Device Socket)
+
+Connect a new socket to the daemon and send a DEVICE_HANDSHAKE:
+
+```
+→ {event: "device_handshake",
+     device_id: "stream:alice:7f9a8b2c-1d3e-4f5a-6b7c-8d9e0f1a2b3c"}
+```
+
+The server:
+1. Parses `stream:` prefix, splits into `client_id=alice`, `stream_id=7f9a...`
+2. Looks up the stream session
+3. Verifies session->client_id matches
+4. Routes the socket to the file handle
+
+#### Step 3a: Read Stream (file → client)
+
+```
+← [4-byte size][file bytes...]
+← (connection closes when transfer completes)
+```
+
+The server opens `uuid.dat`, reads 64KB chunks, and writes them directly
+to the socket. No buffering — data goes disk → kernel → wire.
+
+#### Step 3b: Write Stream (client → file)
+
+```
+→ [4-byte size][file bytes...]
+→ (client closes connection when done)
+```
+
+The server reads 64KB chunks from the socket and writes them to a temp
+file (`uuid.dat.stream`). On client disconnect, it atomically renames
+to `uuid.dat`. If a delete raced with the stream, the ledger entry is
+re-registered automatically.
+
+**When to use streaming:**
+- Large files (videos, datasets, backups)
+- Real-time data (logs, telemetry)
+- WebRTC transport (browser clients)
+- Zero-copy, no server-side buffering
+
+#### Close Stream (optional)
+
+```
+→ {event: "close_stream", stream_id: "alice:7f9a..."}
+← {event: "stream_closed", status: "ok"}
+```
+
+Streams are also cleaned up when the data channel disconnects.
+
+---
+
+### Data Channel Format
+
+Streams use a simple framed format:
+
+```
+[4-byte big-endian size][data bytes...]
+
+Example: 1024 bytes of file data
+[0x00][0x00][0x04][0x00]  ← size = 1024
+[data bytes x1024]          ← the chunk
+```
+
+For reads: the server sends one frame with the file size, then the data.
+For writes: the client sends one frame. The server writes to a temp file
+and renames on completion.
+
+---
 
 ### Path Resolution
 
-Each client has a hierarchical **ledger** file that maps path segments
-to actual file paths on disk:
+Each client has a hierarchical **ledger** file at `data/clients/<id>/.ledger`.
+The ledger maps path segments to UUID filenames on disk:
 
 ```
 Ledger structure (NoteBytes::Object):
 {
   "apps": {
     "config": {
-      "settings": [0x01 → "/data/uuid1.dat"]
+      "settings": [0x01 → "data/clients/alice/a1b2...dat"]
     },
-    "data": [0x01 → "/data/uuid2.dat"]
+    "data": [0x01 → "data/clients/alice/c3d4...dat"]
   }
 }
 ```
 
-Where `0x01` (FILE_PATH marker) points to the actual data file.
-This mirrors the Java NotePath system exactly, with encryption stripped.
+- `0x01` (FILE_PATH marker) = terminal entry pointing to the actual file
+- The ledger is a plain NoteBytes::Object (no encryption)
+- Multiple path segments create nested objects (like a filesystem tree)
+- `resolve_or_create_path` traverses the hierarchy, creating entries as needed
+- This mirrors the Java NotePath system exactly, with encryption stripped
