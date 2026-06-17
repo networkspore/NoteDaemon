@@ -90,10 +90,19 @@ NoteBytes::Object NoteFileLedger::read_ledger(const std::string& path) {
 bool NoteFileLedger::write_ledger(const std::string& path,
                                    const NoteBytes::Object& obj) {
     auto ser = obj.serialize();
-    std::ofstream out(path, std::ios::binary);
-    if (!out) return false;
-    out.write((const char*)ser.data(), ser.size());
-    return out.good();
+    // Write to temp file first, then atomic rename
+    std::string tmp = path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary);
+        if (!out) return false;
+        out.write((const char*)ser.data(), ser.size());
+        if (!out.good()) { unlink(tmp.c_str()); return false; }
+    }
+    if (rename(tmp.c_str(), path.c_str()) != 0) {
+        unlink(tmp.c_str());
+        return false;
+    }
+    return true;
 }
 
 // ══════════════════════════════════════════════════════════════════════════

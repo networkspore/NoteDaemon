@@ -180,8 +180,10 @@ private:
     mutable std::mutex handles_mutex_;
     std::unordered_map<std::string, std::weak_ptr<NoteFileHandle>> handles_;
 
-    // Ledger access serialization
-    mutable std::mutex ledger_mutex_;
+    // Per-client ledger locks (striped, 64 buckets)
+    mutable std::mutex ledger_locks_mutex_;
+    mutable std::unordered_map<std::string, std::unique_ptr<std::mutex>> ledger_locks_;
+    std::mutex& get_ledger_lock(const std::string& client_id) const;
 };
 
 // ── Global accessor ──────────────────────────────────────────────────────

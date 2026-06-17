@@ -273,6 +273,17 @@ void NoteFileService::invalidate_client_token(const std::string& sid) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+// Per-client ledger locking
+// ══════════════════════════════════════════════════════════════════════════
+
+std::mutex& NoteFileService::get_ledger_lock(const std::string& cid) const {
+    std::lock_guard<std::mutex> l(ledger_locks_mutex_);
+    auto& ptr = ledger_locks_[cid];
+    if (!ptr) ptr = std::make_unique<std::mutex>();
+    return *ptr;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // File paths & I/O
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -292,7 +303,7 @@ std::string NoteFileService::resolve_or_create_path(
     const std::string& cid,
     const std::vector<NoteBytes::Value>& path_segments)
 {
-    std::lock_guard<std::mutex> lock(ledger_mutex_);
+    std::lock_guard<std::mutex> lock(get_ledger_lock(cid));
     NoteFilePath np(client_ledger_path(cid), path_segments,
                     client_data_dir(cid));
     return NoteFileLedger::find_or_create_path(np);
@@ -377,7 +388,7 @@ bool NoteFileService::delete_file(
     const std::vector<NoteBytes::Value>& path_segments,
     bool recursive)
 {
-    std::lock_guard<std::mutex> lock(ledger_mutex_);
+    std::lock_guard<std::mutex> lock(get_ledger_lock(cid));
     NoteFilePath np(client_ledger_path(cid), path_segments,
                     client_data_dir(cid), recursive);
     return NoteFileLedger::delete_from_path(np);
