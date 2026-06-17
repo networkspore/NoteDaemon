@@ -20,9 +20,7 @@ protected:
         temp_dir = std::string("/tmp/notefile_test_") + std::to_string(getpid());
         NoteFileConfig cfg;
         cfg.data_directory = temp_dir + "/data";
-        cfg.server_key_path = temp_dir + "/server.key";
         cfg.admin_key_path = temp_dir + "/admin.key";
-        cfg.clients_registry = temp_dir + "/clients.dat";
         service = std::make_shared<NoteFileService>(cfg);
         ASSERT_TRUE(service->init());
     }

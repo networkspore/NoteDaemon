@@ -1,38 +1,30 @@
 // include/note_file_service.h
-// NoteFileService – auth + zone-isolated file registry
+// NoteFileService – filesystem-backed auth + zone-isolated storage
 //
 // Architecture:
 //
-//   ┌────────────────────────────────────────────────────────────┐
-//   │  TLS Server Key  (for SSL transport encryption)            │
-//   │  /etc/netnotes/server.key  (perm 0600, daemon-owned)       │
-//   ├────────────────────────────────────────────────────────────┤
-//   │  Admin API Key  (bcrypt-hashed)                           │
-//   │  /etc/netnotes/admin.key  (perm 0600)                     │
-//   │  Admin manages clients: add/remove/list/change API keys   │
-//   ├────────────────────────────────────────────────────────────┤
-//   │  Client Registry  (bcrypt-hashed API keys per client)     │
-//   │  /etc/netnotes/clients.dat  (perm 0600, plain NoteBytes)  │
-//   │  client_id → { api_key_hash, created_at }                 │
-//   ├────────────────────────────────────────────────────────────┤
-//   │  NoteBytes Zones  (plaintext at rest, permission-protected)│
-//   │  /var/netnotes/data/<client_id>/...  (per-client dirs)    │
-//   └────────────────────────────────────────────────────────────┘
+//   /var/netnotes/data/
+//     clients/
+//       <client_id>/          ← zone existence = directory exists
+//         .auth               ← API key hash (SHA-256 with salt)
+//         .ledger             ← NoteBytes path ledger
+//         <uuid>.dat          ← actual data files
+//
+//   No central registry. The filesystem IS the database.
+//   Client exists iff `data/clients/<client_id>/` exists.
 //
 // Management socket handlers:
-//   admin_auth           {api_key} → admin session
-//   set_admin_api_key    {api_key}  (first boot only)
-//   add_client           {api_key, client_id, client_api_key}
-//   remove_client        {api_key, client_id}
-//   list_clients         {api_key} → client list
-//   client_auth          {client_id, api_key} → client session
-//   get_file             {client_id, path}
-//   put_file             {client_id, path, data}
-//   delete_file          {client_id, path}
-//
-// Data channel (Unix/TCP/WebRTC):
-//   Stream NoteBytes for claimed files (plaintext transport,
-//   pipe should be over TLS or Unix socket with peer cred)
+//   set_admin_api_key  {api_key}        first-boot admin setup
+//   admin_auth         {api_key}        admin login
+//   add_client         {client_id, api_key}
+//   remove_client      {client_id}
+//   list_clients
+//   client_auth        {client_id, api_key}
+//   get_file           {client_id, path}
+//   put_file           {client_id, path, data}
+//   delete_file        {client_id, path}
+//   open_file_stream   {client_id, path, mode}
+//   close_stream       {stream_id}
 
 #ifndef NOTE_FILE_SERVICE_H
 #define NOTE_FILE_SERVICE_H
@@ -50,9 +42,8 @@
 
 class NoteFileHandle;
 class NoteFilePath;
-namespace NoteDaemon { class Channel; }
 
-// ── Stream session – links a data Channel to a NoteFileHandle ────────────
+// ── Stream session ───────────────────────────────────────────────────────
 
 enum class StreamMode { READ, WRITE };
 
@@ -62,13 +53,6 @@ struct StreamSession {
     std::shared_ptr<NoteFileHandle> handle;
     StreamMode mode;
     bool active = false;
-};
-
-// ── Client entry ─────────────────────────────────────────────────────────
-
-struct ClientEntry {
-    std::vector<uint8_t> api_key_hash;  // bcrypt-style hash of client's API key
-    uint64_t created_at_ms = 0;
 };
 
 // ── Auth tokens ──────────────────────────────────────────────────────────
@@ -91,10 +75,8 @@ struct ClientToken {
 // ── Configuration ────────────────────────────────────────────────────────
 
 struct NoteFileConfig {
-    std::string data_directory;       // /var/netnotes/data (per-client subdirs)
-    std::string server_key_path;      // /etc/netnotes/server.key (TLS)
+    std::string data_directory;       // /var/netnotes/data
     std::string admin_key_path;       // /etc/netnotes/admin.key
-    std::string clients_registry;     // /etc/netnotes/clients.dat
 };
 
 // ── NoteFileService ──────────────────────────────────────────────────────
@@ -103,80 +85,40 @@ class NoteFileService : public std::enable_shared_from_this<NoteFileService> {
 public:
     explicit NoteFileService(const NoteFileConfig& config);
     ~NoteFileService();
-
     NoteFileService(const NoteFileService&) = delete;
     NoteFileService& operator=(const NoteFileService&) = delete;
-
-    // ── Init ────────────────────────────────────────────────────────────
 
     bool init();
     bool is_initialized() const { return initialized_.load(); }
 
-    // ── Admin API key ───────────────────────────────────────────────────
-
+    // ── Admin ───────────────────────────────────────────────────────────
     bool set_admin_api_key(const std::string& api_key);
     bool verify_admin_api_key(const std::string& api_key) const;
     bool has_admin_api_key() const;
-
     std::unique_ptr<AdminToken> authenticate_admin(const std::string& api_key,
                                                     pid_t client_pid);
-    void invalidate_admin_token(const std::string& session_id);
+    void invalidate_admin_token(const std::string& sid);
 
-    // ── Client management (admin only) ──────────────────────────────────
-
+    // ── Clients (filesystem-backed, no registry) ────────────────────────
     bool add_client(const std::string& client_id,
-                     const std::string& client_api_key);
+                     const std::string& api_key);
     bool remove_client(const std::string& client_id);
     std::vector<std::string> list_clients() const;
-
-    // ── Client authentication ───────────────────────────────────────────
+    bool client_exists(const std::string& client_id) const;
 
     std::unique_ptr<ClientToken> authenticate_client(
         const std::string& client_id,
         const std::string& api_key,
         pid_t client_pid);
-    void invalidate_client_token(const std::string& session_id);
+    void invalidate_client_token(const std::string& sid);
 
-    // ── Stream management ───────────────────────────────────────────────
-
-    /**
-     * Open a streaming session for a file.
-     * Returns a StreamSession with a unique stream_id.
-     * The caller then connects a Channel with that stream_id.
-     */
-    std::unique_ptr<StreamSession> open_stream(
-        const std::string& client_id,
-        const std::vector<NoteBytes::Value>& path_segments,
-        StreamMode mode);
-
-    /**
-     * Look up a stream session by stream_id.
-     * Used by the core to route an incoming Channel to the right file handle.
-     */
-    StreamSession* get_stream(const std::string& stream_id);
-
-    /**
-     * Close and remove a stream session.
-     */
-    void close_stream(const std::string& stream_id);
-
-    /**
-     * Route a Channel to an open stream session.
-     * Called when a device socket or WebRTC data channel arrives
-     * with a stream_id matching an open session.
-     */
-    bool route_channel(const std::string& stream_id,
-                       NoteDaemon::Channel* channel);
-
-    // ── File operations (per-client zone) ───────────────────────────────
-
+    // ── File operations ────────────────────────────────────────────────
     std::shared_ptr<NoteFileHandle> get_file(
         const std::string& client_id,
         const std::vector<NoteBytes::Value>& path_segments);
-
     std::shared_ptr<NoteFileHandle> get_file(
         const std::string& client_id,
-        const std::vector<std::string>& path_segments);
+        const std::vector<std::string>& segments);
 
     bool delete_file(const std::string& client_id,
                      const std::vector<NoteBytes::Value>& path,
@@ -184,39 +126,38 @@ public:
 
     std::vector<std::string> list_client_files(const std::string& client_id);
 
-    // ── Internal (for NoteFileHandle) ───────────────────────────────────
+    // ── Stream management ──────────────────────────────────────────────
+    std::unique_ptr<StreamSession> open_stream(
+        const std::string& client_id,
+        const std::vector<NoteBytes::Value>& path_segments,
+        StreamMode mode);
+    StreamSession* get_stream(const std::string& stream_id);
+    void close_stream(const std::string& stream_id);
+    bool route_channel(const std::string& stream_id,
+                       NoteDaemon::Channel* channel);
 
+    // ── Internal ───────────────────────────────────────────────────────
     std::string resolve_or_create_path(
         const std::string& client_id,
         const std::vector<NoteBytes::Value>& path_segments);
-
     std::vector<uint8_t> read_file_to_buffer(const std::string& file_path);
     bool write_buffer_to_file(const std::string& file_path,
                                const std::vector<uint8_t>& data);
-
     std::string client_data_dir(const std::string& client_id) const;
-    bool create_pipe(int& read_fd, int& write_fd);
-
-    // ── Handle registry ────────────────────────────────────────────────
-
-    void register_handle(NoteFileHandle* handle);
-    void unregister_handle(NoteFileHandle* handle);
+    bool create_pipe(int& r, int& w);
+    void register_handle(NoteFileHandle* h);
+    void unregister_handle(NoteFileHandle* h);
     size_t active_handle_count() const;
 
 private:
-    // Password hashing
-    std::vector<uint8_t> hash_api_key(const std::string& api_key) const;
-    bool verify_api_key(const std::string& api_key,
-                         const std::vector<uint8_t>& hash) const;
-
-    // Client registry I/O
-    bool save_clients_registry();
-    bool load_clients_registry();
-
-    // Mics
-    std::vector<uint8_t> random_bytes(size_t length) const;
-    std::string generate_data_file_path(const std::string& client_id) const;
+    // Helpers
+    std::vector<uint8_t> hash_key(const std::string& key) const;
+    bool verify_key(const std::string& key,
+                     const std::vector<uint8_t>& hash) const;
+    std::string auth_file(const std::string& client_id) const;
     std::string client_ledger_path(const std::string& client_id) const;
+    std::string generate_data_file_path(const std::string& client_id) const;
+    std::vector<uint8_t> random_bytes(size_t len) const;
 
     NoteFileConfig config_;
     std::atomic<bool> initialized_{false};
@@ -224,17 +165,12 @@ private:
 
     // Admin
     mutable std::mutex admin_mutex_;
-    std::vector<uint8_t> admin_api_key_hash_;
+    std::vector<uint8_t> admin_key_hash_;
     std::unordered_map<std::string, std::unique_ptr<AdminToken>> admin_tokens_;
-    uint64_t next_session_ = 1;
 
-    // Clients
-    mutable std::mutex clients_mutex_;
-    std::unordered_map<std::string, ClientEntry> clients_;
+    // Client tokens (in-memory only, .auth is on disk)
+    mutable std::mutex client_mutex_;
     std::unordered_map<std::string, std::unique_ptr<ClientToken>> client_tokens_;
-
-    // Ledger access
-    mutable std::mutex ledger_mutex_;
 
     // Stream sessions
     mutable std::mutex streams_mutex_;
@@ -243,11 +179,14 @@ private:
     // Handle registry
     mutable std::mutex handles_mutex_;
     std::unordered_map<std::string, std::weak_ptr<NoteFileHandle>> handles_;
+
+    // Ledger access serialization
+    mutable std::mutex ledger_mutex_;
 };
 
 // ── Global accessor ──────────────────────────────────────────────────────
 
 NoteFileService* get_file_service();
-void set_file_service(NoteFileService* service);
+void set_file_service(NoteFileService* s);
 
-#endif // NOTE_FILE_SERVICE_H
+#endif

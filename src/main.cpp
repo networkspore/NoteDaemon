@@ -309,9 +309,8 @@ public:
         // during their init() / start() for state persistence.
         {
             NoteFileConfig file_config;
-            file_config.data_directory = paths_.root + "/data/files";
-            file_config.clients_registry = paths_.root + "/clients.dat";
-            // removed
+            file_config.data_directory = paths_.root + "/data";
+            file_config.admin_key_path = paths_.root + "/admin.key";
             
             file_service_ = std::make_unique<NoteFileService>(file_config);
             if (file_service_->init()) {
