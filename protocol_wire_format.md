@@ -244,3 +244,82 @@ When encryption is active:
 4. Result maintains same structure: `[sourceId][ENCRYPTED][length][ciphertext]`
 
 This means the encryption is **transparent** to the protocol structure.
+
+---
+
+## NoteFile Service Protocol
+
+The NoteFile service uses the management socket for control operations.
+Messages follow the standard OBJECT format with string keys.
+
+### Admin Authentication
+
+```
+→ { "event": "admin_auth", "api_key": "admin-secret-123" }
+← { "event": "admin_auth_result", "status": "ok", "session_id": "..." }
+```
+
+### Client Management (admin only)
+
+```
+→ { "event": "add_client", "client_id": "alice",
+     "api_key": "alice-client-key" }
+← { "event": "client_added", "status": "ok" }
+
+→ { "event": "remove_client", "client_id": "alice" }
+← { "event": "client_removed", "status": "ok" }
+
+→ { "event": "list_clients" }
+← { "event": "client_list", "clients": ["alice", "bob"] }
+```
+
+### Client Authentication
+
+```
+→ { "event": "client_auth", "client_id": "alice",
+     "api_key": "alice-client-key" }
+← { "event": "client_auth_result", "status": "ok",
+     "session_id": "..." }
+```
+
+### File Operations (per-client)
+
+Paths are hierarchical arrays of string segments.
+Files are NoteBytes::Object values stored at the resolved path.
+
+```
+→ { "event": "get_file", "client_id": "alice",
+     "path": "apps/config/settings" }
+← { "event": "file_content", "client_id": "alice",
+     "path": "apps/config/settings",
+     "data": <OBJECT bytes> }
+
+→ { "event": "put_file", "client_id": "alice",
+     "path": "apps/config/settings",
+     "data": <OBJECT bytes> }
+← { "event": "file_written", "status": "ok" }
+
+→ { "event": "delete_file", "client_id": "alice",
+     "path": "apps/config/settings" }
+← { "event": "file_deleted", "status": "ok" }
+```
+
+### Path Resolution
+
+Each client has a hierarchical **ledger** file that maps path segments
+to actual file paths on disk:
+
+```
+Ledger structure (NoteBytes::Object):
+{
+  "apps": {
+    "config": {
+      "settings": [0x01 → "/data/uuid1.dat"]
+    },
+    "data": [0x01 → "/data/uuid2.dat"]
+  }
+}
+```
+
+Where `0x01` (FILE_PATH marker) points to the actual data file.
+This mirrors the Java NotePath system exactly, with encryption stripped.

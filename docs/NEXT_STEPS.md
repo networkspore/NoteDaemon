@@ -196,3 +196,25 @@ Constraints:
 - Must respect staleness rules (R2).
 
 This is a "nice to have" and should be considered only after R1/R2 are stable.
+
+---
+
+## NoteFile Service Items
+
+### Phase 1 (Done)
+- [x] NoteFileHandle – streamable NoteBytes with per-client zone ID
+- [x] NoteFileService – auth provider + file CRUD + zone isolation
+- [x] Plaintext ledger (Java NotePath port, encryption stripped)
+- [x] Admin API key authentication (SHA-256 hashed)
+- [x] Client API key authentication + per-client zones
+- [x] Management handlers: admin_auth, add/remove/list clients, get/put/delete file
+- [x] 10 unit tests passing
+
+### Phase 2 (Next)
+- [ ] TLS integration – server.key for SSL transport
+- [ ] Data channel streaming – NoteFile read/write over WebRTC/TCP/Unix Channel
+- [ ] Client password change – re-encrypt zone data with new key
+- [ ] Zone quota enforcement – disk space limits per client_id
+- [ ] Admin API key rotation – replace key without downtime
+- [ ] Audit logging – track file access per client_id
+- [ ] Garbage collection – clean up orphaned .dat files after ledger changes
