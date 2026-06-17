@@ -915,19 +915,29 @@ private:
 
         std::string device_id = device_id_val->as_string();
 
-        // Check if this is a NoteFile stream_id (prefix "stream:")
+        // Check if this is a NoteFile stream: prefix
         if (device_id.find("stream:") == 0) {
-            std::string stream_id = device_id.substr(7);
-            syslog(LOG_INFO, "Routing device socket to file stream: %s",
-                   stream_id.c_str());
-            auto* svc = get_file_service();
-            if (svc) {
-                auto* ch = new UnixChannel(client_fd, client_pid, device_id);
-                if (!svc->route_channel(stream_id, ch)) {
-                    syslog(LOG_WARNING, "Failed to route stream: %s",
-                           stream_id.c_str());
+            std::string rest = device_id.substr(7);  // "client:uuid"
+            size_t colon = rest.find(':');
+            if (colon != std::string::npos) {
+                std::string client_id = rest.substr(0, colon);
+                std::string stream_id = rest.substr(colon + 1);
+                syslog(LOG_INFO, "File stream from client=%s stream=%s",
+                       client_id.c_str(), stream_id.c_str());
+                auto* svc = get_file_service();
+                if (svc) {
+                    auto* session = svc->get_stream(stream_id);
+                    if (session && session->client_id == client_id) {
+                        auto* ch = new UnixChannel(client_fd, client_pid, device_id);
+                        if (!svc->route_channel(stream_id, ch)) {
+                            syslog(LOG_WARNING, "route failed: %s", stream_id.c_str());
+                        }
+                        delete ch;
+                    } else {
+                        syslog(LOG_WARNING, "Stream %s not found or client mismatch",
+                               stream_id.c_str());
+                    }
                 }
-                delete ch;
             }
             safe_close(client_fd);
             return;
@@ -1690,9 +1700,12 @@ private:
             return;
         }
 
+        // Return the client-prefixed stream_id for data channel routing
+        std::string routed_id = session->client_id + ":" + session->stream_id;
+
         NoteBytes::Object resp;
         resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("stream_opened"));
-        resp.add(NoteBytes::Value("stream_id"), session->stream_id);
+        resp.add(NoteBytes::Value("stream_id"), routed_id);
         resp.add(NoteBytes::Value("mode"), *mode_val);
         resp.add(NoteBytes::Value("size"),
                  NoteBytes::Value(static_cast<int64_t>(session->handle->size())));
@@ -1710,7 +1723,11 @@ private:
         auto* svc = get_file_service();
         if (!svc) { send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
                               "Service not available"); return; }
-        svc->close_stream(sid->as_string());
+        std::string raw = sid->as_string();
+        // Strip client prefix if present: "client:uuid" → "uuid"
+        size_t c = raw.find(':');
+        if (c != std::string::npos && c > 0) raw = raw.substr(c + 1);
+        svc->close_stream(raw);
         NoteBytes::Object resp;
         resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("stream_closed"));
         resp.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);

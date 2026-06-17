@@ -451,6 +451,7 @@ std::unique_ptr<StreamSession> NoteFileService::open_stream(
 
     auto session = std::make_unique<StreamSession>();
     session->stream_id = uuid_str();
+    session->client_id = client_id;
     session->handle = handle;
     session->mode = mode;
 

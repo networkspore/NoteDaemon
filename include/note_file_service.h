@@ -58,6 +58,7 @@ enum class StreamMode { READ, WRITE };
 
 struct StreamSession {
     std::string stream_id;
+    std::string client_id;
     std::shared_ptr<NoteFileHandle> handle;
     StreamMode mode;
     bool active = false;
