@@ -1164,6 +1164,22 @@ private:
     handle_note_file_delete(reply_fd, msg, client_pid);
     return;
   }
+  if (msg_type == "add_client") {
+    handle_add_client(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "remove_client") {
+    handle_remove_client(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "list_clients") {
+    handle_list_clients(reply_fd, msg, client_pid);
+    return;
+  }
+  if (msg_type == "client_auth") {
+    handle_client_auth(reply_fd, msg, client_pid);
+    return;
+  }
   if (msg_type == "open_file_stream") {
     handle_open_file_stream(reply_fd, msg, client_pid);
     return;
@@ -1660,6 +1676,85 @@ private:
         response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
         response.add(NoteBytes::Value("path"), NoteBytes::Value(path_str));
         write_to_fd(reply_fd, response);
+    }
+
+    // ── Client management handlers ───────────────────────────────────────────
+
+    void handle_add_client(int reply_fd, const NoteBytes::Object& msg, pid_t) {
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
+        auto* key = msg.get(NoteBytes::Value("api_key"));
+        if (!cid || !key) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing client_id or api_key");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) { send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN, "Service not available"); return; }
+        if (!svc->add_client(cid->as_string(), key->as_string())) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Client already exists");
+            return;
+        }
+        NoteBytes::Object resp;
+        resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("client_added"));
+        resp.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        write_to_fd(reply_fd, resp);
+    }
+
+    void handle_remove_client(int reply_fd, const NoteBytes::Object& msg, pid_t) {
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
+        if (!cid) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing client_id");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) { send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN, "Service not available"); return; }
+        if (!svc->remove_client(cid->as_string())) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "Client not found");
+            return;
+        }
+        NoteBytes::Object resp;
+        resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("client_removed"));
+        resp.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        write_to_fd(reply_fd, resp);
+    }
+
+    void handle_list_clients(int reply_fd, const NoteBytes::Object&, pid_t) {
+        auto* svc = get_file_service();
+        if (!svc) { send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN, "Service not available"); return; }
+        auto clients = svc->list_clients();
+        NoteBytes::Object resp;
+        resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("client_list"));
+        NoteBytes::Array arr;
+        for (const auto& c : clients) arr.add(NoteBytes::Value(c));
+        resp.add(NoteBytes::Value("clients"), arr.as_value());
+        write_to_fd(reply_fd, resp);
+    }
+
+    void handle_client_auth(int reply_fd, const NoteBytes::Object& msg, pid_t pid) {
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
+        auto* key = msg.get(NoteBytes::Value("api_key"));
+        if (!cid || !key) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing client_id or api_key");
+            return;
+        }
+        auto* svc = get_file_service();
+        if (!svc) { send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN, "Service not available"); return; }
+        auto token = svc->authenticate_client(cid->as_string(), key->as_string(), pid);
+        if (!token) {
+            send_error(reply_fd, NoteMessaging::ErrorCodes::UNAUTHORIZED,
+                      "Invalid client credentials");
+            return;
+        }
+        NoteBytes::Object resp;
+        resp.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("client_auth_result"));
+        resp.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        resp.add(NoteBytes::Value("client_id"), *cid);
+        resp.add(NoteBytes::Value("session_id"), token->session_id);
+        write_to_fd(reply_fd, resp);
     }
 
     // ── File stream handlers ─────────────────────────────────────────────────
