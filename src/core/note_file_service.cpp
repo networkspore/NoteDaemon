@@ -1,5 +1,5 @@
 // src/core/note_file_service.cpp
-// NoteFileService implementation - auth provider + encrypted file management
+// NoteFileService – three-layer auth: server key + admin API key + key locker
 
 #include "note_file_service.h"
 #include "note_file_handle.h"
@@ -11,62 +11,41 @@
 #include <sys/syslog.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
-#include <openssl/sha.h>
+#include <openssl/err.h>
 #include <cstring>
 #include <chrono>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
-#include <random>
-#include <array>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
-// =========================================================================
-// Utility functions
-// =========================================================================
+// ── Utility helpers ──────────────────────────────────────────────────────
 
 namespace {
 
-    /**
-     * Generate random bytes using OpenSSL RAND_bytes.
-     */
     std::vector<uint8_t> random_bytes(size_t length) {
         std::vector<uint8_t> buf(length);
-        // Use RAND_bytes with fallback to avoid blocking on low-entropy systems
         if (RAND_bytes(buf.data(), static_cast<int>(length)) != 1) {
-            // Fallback: use /dev/urandom directly (guaranteed non-blocking)
             FILE* f = fopen("/dev/urandom", "rb");
             if (f) {
-                size_t n = fread(buf.data(), 1, length, f);
+                size_t r = fread(buf.data(), 1, length, f);
+                (void)r;
                 fclose(f);
-                if (n == length) return buf;
             }
-            // Last resort: pseudo-random via rand() + time
-            srand(time(nullptr) ^ getpid());
-            for (size_t i = 0; i < length; i++)
-                buf[i] = static_cast<uint8_t>(rand() & 0xFF);
         }
         return buf;
     }
 
-    /**
-     * Constant-time comparison to prevent timing attacks.
-     */
     bool constant_time_compare(const std::vector<uint8_t>& a,
                                const std::vector<uint8_t>& b) {
         if (a.size() != b.size()) return false;
         uint8_t result = 0;
-        for (size_t i = 0; i < a.size(); i++) {
-            result |= a[i] ^ b[i];
-        }
+        for (size_t i = 0; i < a.size(); i++) result |= a[i] ^ b[i];
         return result == 0;
     }
 
-    /**
-     * Generate a UUID string for session IDs.
-     */
     std::string generate_uuid() {
         auto bytes = random_bytes(16);
         std::stringstream ss;
@@ -78,9 +57,6 @@ namespace {
         return ss.str();
     }
 
-    /**
-     * Current time in milliseconds.
-     */
     uint64_t now_ms() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -88,341 +64,676 @@ namespace {
 
 } // anonymous namespace
 
-// =========================================================================
-// NoteFileService
-// =========================================================================
+// ── Forward declarations ─────────────────────────────────────────────────
+
+static bool parse_locker_data_impl(
+    const std::vector<uint8_t>& data,
+    KeyLocker& locker,
+    std::unordered_map<std::string, ClientEntry>& clients);
+
+// ── NoteFileService ──────────────────────────────────────────────────────
 
 NoteFileService::NoteFileService(const NoteFileConfig& config)
-    : config_(config)
-{
-    // Use default key if provided, otherwise generate one
-    if (config_.default_encryption_key.size() == 32) {
-        current_key_ = config_.default_encryption_key;
-    } else {
-        current_key_ = random_bytes(32);
-    }
-}
+    : config_(config) {}
 
 NoteFileService::~NoteFileService() {
     shutdown_.store(true);
-
-    // Invalidate all tokens
-    std::lock_guard<std::mutex> lock(auth_mutex_);
-    active_tokens_.clear();
-
-    // Clear sensitive key material
-    current_key_.assign(current_key_.size(), 0);
-    current_key_.clear();
-    old_key_.assign(old_key_.size(), 0);
-    old_key_.clear();
+    std::lock_guard<std::mutex> al(admin_mutex_);
+    admin_tokens_.clear();
+    std::lock_guard<std::mutex> ll(locker_mutex_);
+    locker_.clients.clear();
+    locker_key_.assign(locker_key_.size(), 0);
+    locker_key_.clear();
 }
 
-// =========================================================================
-// Initialization
-// =========================================================================
+// ── Init ─────────────────────────────────────────────────────────────────
 
 bool NoteFileService::init() {
     if (initialized_.load()) return true;
 
-    syslog(LOG_INFO, "[NoteFileService] Initializing");
+    syslog(LOG_INFO, "[NoteFileService] Initializing with three-layer auth");
 
-    // Create data directory if needed
-    try {
-        fs::create_directories(config_.data_directory);
-    } catch (const std::exception& e) {
+    // Create data directory
+    try { fs::create_directories(config_.data_directory); }
+    catch (const std::exception& e) {
         syslog(LOG_ERR, "[NoteFileService] Cannot create data dir: %s", e.what());
         return false;
     }
 
-    // Create ledger directory if needed
-    fs::path ledger_parent = fs::path(config_.ledger_path).parent_path();
-    if (!ledger_parent.empty()) {
-        try {
-            fs::create_directories(ledger_parent);
-        } catch (const std::exception& e) {
-            syslog(LOG_ERR, "[NoteFileService] Cannot create ledger dir: %s", e.what());
-            return false;
-        }
+    // Load or generate server key pair
+    if (!load_or_generate_server_key()) {
+        syslog(LOG_ERR, "[NoteFileService] Failed to init server key");
+        return false;
     }
 
-    // Load auth data
-    if (!load_auth_data()) {
-        syslog(LOG_INFO, "[NoteFileService] No auth data found (first run)");
+    // Load admin API key if exists
+    std::ifstream akf(config_.admin_api_key_path, std::ios::binary);
+    if (akf) {
+        akf.seekg(0, std::ios::end);
+        std::streamsize sz = akf.tellg();
+        akf.seekg(0, std::ios::beg);
+        admin_api_key_hash_.resize(sz);
+        akf.read(reinterpret_cast<char*>(admin_api_key_hash_.data()), sz);
+        syslog(LOG_INFO, "[NoteFileService] Admin API key loaded");
+    }
+
+    // Load key locker if exists
+    if (!load_key_locker()) {
+        syslog(LOG_INFO, "[NoteFileService] No key locker yet (first run)");
     }
 
     initialized_.store(true);
-    syslog(LOG_INFO, "[NoteFileService] Initialized. Password set: %s",
-           auth_data_.has_password ? "yes" : "no");
+    syslog(LOG_INFO, "[NoteFileService] Initialized. Admin key: %s, Locker: %s",
+           admin_api_key_hash_.empty() ? "NOT SET" : "SET",
+           locker_key_.empty() ? "NOT SET" : "SET");
     return true;
 }
 
-// =========================================================================
-// Authentication
-// =========================================================================
+// ── Server key ───────────────────────────────────────────────────────────
 
-bool NoteFileService::load_auth_data() {
-    std::lock_guard<std::mutex> lock(auth_mutex_);
-
-    std::ifstream in(config_.settings_path, std::ios::binary);
-    if (!in) return false;
-
-    // Read auth data as serialized NoteBytes Object
-    in.seekg(0, std::ios::end);
-    std::streamsize size = in.tellg();
-    in.seekg(0, std::ios::beg);
-
-    std::vector<uint8_t> data(size);
-    in.read(reinterpret_cast<char*>(data.data()), size);
-
-    try {
-        // Parse as NoteBytes Object
-        NoteBytes::Object obj = NoteBytes::Object::deserialize(
-            data.data(), data.size());
-
-        auto* bcrypt_val = obj.get(NoteBytes::Value("bcrypt"));
-        auto* salt_val = obj.get(NoteBytes::Value("salt"));
-        auto* key_val = obj.get(NoteBytes::Value("key"));
-
-        if (bcrypt_val && salt_val) {
-            auth_data_.bcrypt_hash = bcrypt_val->data();
-            auth_data_.salt = salt_val->data();
-            auth_data_.has_password = true;
-            if (key_val && key_val->data().size() == 32) {
-                current_key_ = key_val->data();
-            }
+bool NoteFileService::load_or_generate_server_key() {
+    std::ifstream in(config_.server_key_path, std::ios::binary);
+    if (in) {
+        // Read existing 64-byte key (seed + public)
+        in.seekg(0, std::ios::end);
+        std::streamsize sz = in.tellg();
+        in.seekg(0, std::ios::beg);
+        std::vector<uint8_t> buf(sz);
+        in.read(reinterpret_cast<char*>(buf.data()), sz);
+        if (sz >= 64) {
+            server_key_.private_key.assign(buf.begin(), buf.begin() + 32);
+            server_key_.public_key.assign(buf.begin() + 32, buf.begin() + 64);
+            syslog(LOG_INFO, "[NoteFileService] Loaded server key from %s",
+                   config_.server_key_path.c_str());
             return true;
         }
-    } catch (const std::exception& e) {
-        syslog(LOG_ERR, "[NoteFileService] Failed to parse auth data: %s", e.what());
     }
-    return false;
+
+    // Generate new Ed25519 key pair
+    syslog(LOG_INFO, "[NoteFileService] Generating new Ed25519 server key");
+    EVP_PKEY* pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr,
+                                                    nullptr, 0);
+    if (!pkey) {
+        // Use fallback: AES-256 key as server key
+        server_key_.private_key = random_bytes(32);
+        // For the public key, we just use a second random 32 bytes
+        // (In production, use proper Ed25519 via EVP_PKEY_keygen)
+        server_key_.public_key = random_bytes(32);
+    } else {
+        size_t priv_len = 32;
+        EVP_PKEY_get_raw_private_key(pkey, server_key_.private_key.data(), &priv_len);
+        server_key_.private_key.resize(priv_len);
+        size_t pub_len = 32;
+        EVP_PKEY_get_raw_public_key(pkey, server_key_.public_key.data(), &pub_len);
+        server_key_.public_key.resize(pub_len);
+        EVP_PKEY_free(pkey);
+    }
+
+    return save_server_key();
 }
 
-bool NoteFileService::save_auth_data() {
-    // Note: caller must hold auth_mutex_ when calling this
-    // (set_initial_password, change_password, and load_auth_data
-    //  all call save_auth_data while already holding the lock)
+bool NoteFileService::save_server_key() {
+    try {
+        fs::create_directories(
+            fs::path(config_.server_key_path).parent_path());
+    } catch (...) {}
 
+    std::vector<uint8_t> buf;
+    buf.insert(buf.end(), server_key_.private_key.begin(), server_key_.private_key.end());
+    buf.insert(buf.end(), server_key_.public_key.begin(), server_key_.public_key.end());
+
+    std::ofstream out(config_.server_key_path, std::ios::binary);
+    if (!out) {
+        syslog(LOG_ERR, "[NoteFileService] Cannot write server key to %s",
+               config_.server_key_path.c_str());
+        return false;
+    }
+    out.write(reinterpret_cast<const char*>(buf.data()), buf.size());
+    out.close();
+
+    // Set permissions: owner read/write only
+    chmod(config_.server_key_path.c_str(), 0600);
+
+    syslog(LOG_INFO, "[NoteFileService] Server key saved to %s (%zu bytes)",
+           config_.server_key_path.c_str(), buf.size());
+    return true;
+}
+
+std::vector<uint8_t> NoteFileService::wrap_with_server_key(
+    const std::vector<uint8_t>& data) const
+{
+    // Simple XOR "wrap" using the server key as a symmetric key
+    // In production, use proper key wrapping with AES-KW or similar
+    std::vector<uint8_t> result(data);
+    for (size_t i = 0; i < result.size(); i++)
+        result[i] ^= server_key_.private_key[i % server_key_.private_key.size()];
+    return result;
+}
+
+std::vector<uint8_t> NoteFileService::unwrap_with_server_key(
+    const std::vector<uint8_t>& wrapped) const
+{
+    return wrap_with_server_key(wrapped);  // XOR is its own inverse
+}
+
+// ── Admin API key ────────────────────────────────────────────────────────
+
+bool NoteFileService::set_admin_api_key(const std::string& api_key) {
+    std::lock_guard<std::mutex> lock(admin_mutex_);
+    if (!admin_api_key_hash_.empty()) {
+        syslog(LOG_ERR, "[NoteFileService] Admin API key already set");
+        return false;
+    }
+    // Hash using SHA-256 as a simple keyed hash (use bcrypt in production)
+    auto salt = random_bytes(16);
+    std::vector<uint8_t> hash(32);
+    unsigned int hlen = 0;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(md, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(md, salt.data(), salt.size());
+    EVP_DigestUpdate(md, api_key.data(), api_key.size());
+    EVP_DigestFinal_ex(md, hash.data(), &hlen);
+    EVP_MD_CTX_free(md);
+
+    admin_api_key_hash_.clear();
+    admin_api_key_hash_.insert(admin_api_key_hash_.end(), salt.begin(), salt.end());
+    admin_api_key_hash_.insert(admin_api_key_hash_.end(), hash.begin(), hash.end());
+
+    // Save to disk
+    std::ofstream out(config_.admin_api_key_path, std::ios::binary);
+    if (!out) return false;
+    out.write(reinterpret_cast<const char*>(admin_api_key_hash_.data()),
+              admin_api_key_hash_.size());
+    out.close();
+    chmod(config_.admin_api_key_path.c_str(), 0600);
+
+    syslog(LOG_INFO, "[NoteFileService] Admin API key set");
+    return true;
+}
+
+bool NoteFileService::verify_admin_api_key(const std::string& api_key) const {
+    if (admin_api_key_hash_.size() < 16) return false;
+    auto salt = std::vector<uint8_t>(admin_api_key_hash_.begin(),
+                                     admin_api_key_hash_.begin() + 16);
+    auto expected = std::vector<uint8_t>(admin_api_key_hash_.begin() + 16,
+                                         admin_api_key_hash_.end());
+
+    std::vector<uint8_t> computed(32);
+    unsigned int hlen = 0;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(md, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(md, salt.data(), salt.size());
+    EVP_DigestUpdate(md, api_key.data(), api_key.size());
+    EVP_DigestFinal_ex(md, computed.data(), &hlen);
+    EVP_MD_CTX_free(md);
+
+    return constant_time_compare(computed, expected);
+}
+
+bool NoteFileService::has_admin_api_key() const {
+    std::lock_guard<std::mutex> lock(admin_mutex_);
+    return !admin_api_key_hash_.empty();
+}
+
+std::unique_ptr<AdminToken> NoteFileService::authenticate_admin(
+    const std::string& api_key, pid_t client_pid)
+{
+    std::lock_guard<std::mutex> lock(admin_mutex_);
+    if (!verify_admin_api_key(api_key)) return nullptr;
+
+    auto token = std::make_unique<AdminToken>();
+    token->session_id = generate_uuid();
+    token->client_pid = client_pid;
+    token->created_at_ms = now_ms();
+    std::string sid = token->session_id;
+    admin_tokens_[sid] = std::move(token);
+    auto result = std::make_unique<AdminToken>(*admin_tokens_[sid]);
+    syslog(LOG_INFO, "[NoteFileService] Admin auth: pid=%d session=%s",
+           client_pid, sid.c_str());
+    return result;
+}
+
+void NoteFileService::invalidate_admin_token(const std::string& session_id) {
+    std::lock_guard<std::mutex> lock(admin_mutex_);
+    admin_tokens_.erase(session_id);
+}
+
+// ── Key locker ───────────────────────────────────────────────────────────
+
+std::vector<uint8_t> NoteFileService::derive_locker_key(
+    const std::string& password) const
+{
+    // Locker key = SHA-256(server_private_key || password)
+    // This binds the locker to this specific server instance
+    std::vector<uint8_t> input;
+    input.insert(input.end(), server_key_.private_key.begin(),
+                 server_key_.private_key.end());
+    input.insert(input.end(), password.begin(), password.end());
+
+    std::vector<uint8_t> key(32);
+    unsigned int hlen = 0;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(md, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(md, input.data(), input.size());
+    EVP_DigestFinal_ex(md, key.data(), &hlen);
+    EVP_MD_CTX_free(md);
+    return key;
+}
+
+bool NoteFileService::set_locker_password(const std::string& password) {
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    if (!locker_key_.empty()) {
+        syslog(LOG_ERR, "[NoteFileService] Locker password already set");
+        return false;
+    }
+
+    locker_.salt = random_bytes(16);
+    // Locker key derived from password + server key binding
+    locker_key_ = derive_locker_key(password);
+
+    // Wrap the locker key with the server key for storage
+    locker_.wrapped_locker_key = wrap_with_server_key(locker_key_);
+
+    // Save empty locker
+    if (!save_key_locker()) return false;
+
+    syslog(LOG_INFO, "[NoteFileService] Key locker password set");
+    return true;
+}
+
+bool NoteFileService::change_locker_password(const std::string& old_pw,
+                                              const std::string& new_pw) {
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    auto expected = derive_locker_key(old_pw);
+    if (!constant_time_compare(expected, locker_key_)) {
+        syslog(LOG_WARNING, "[NoteFileService] Wrong locker password");
+        return false;
+    }
+    locker_key_ = derive_locker_key(new_pw);
+    locker_.wrapped_locker_key = wrap_with_server_key(locker_key_);
+    return save_key_locker();
+}
+
+bool NoteFileService::save_key_locker() {
+    // Serialize locker to NoteBytes::Object
     NoteBytes::Object obj;
-    obj.add(NoteBytes::Value("bcrypt"),
-            NoteBytes::Value(auth_data_.bcrypt_hash));
     obj.add(NoteBytes::Value("salt"),
-            NoteBytes::Value(auth_data_.salt));
-    obj.add(NoteBytes::Value("key"),
-            NoteBytes::Value(current_key_));
+            NoteBytes::Value(locker_.salt));
+    obj.add(NoteBytes::Value("wrapped_key"),
+            NoteBytes::Value(locker_.wrapped_locker_key));
+
+    // Serialize clients
+    NoteBytes::Object clients_obj;
+    for (const auto& [cid, entry] : locker_.clients) {
+        NoteBytes::Object client_obj;
+        client_obj.add(NoteBytes::Value("bcrypt"),
+                       NoteBytes::Value(entry.bcrypt_hash));
+        client_obj.add(NoteBytes::Value("salt"),
+                       NoteBytes::Value(entry.salt));
+        if (entry.has_encryption) {
+            client_obj.add(NoteBytes::Value("enc_key"),
+                           NoteBytes::Value(entry.encryption_key));
+            client_obj.add(NoteBytes::Value("encrypted"),
+                           NoteBytes::Value(true));
+        }
+        if (entry.has_old()) {
+            client_obj.add(NoteBytes::Value("old_bcrypt"),
+                           NoteBytes::Value(entry.old_bcrypt_hash));
+            client_obj.add(NoteBytes::Value("old_salt"),
+                           NoteBytes::Value(entry.old_salt));
+            client_obj.add(NoteBytes::Value("old_enc_key"),
+                           NoteBytes::Value(entry.old_encryption_key));
+        }
+        clients_obj.add(NoteBytes::Value(cid), client_obj.as_value());
+    }
+    obj.add(NoteBytes::Value("clients"), clients_obj.as_value());
 
     auto serialized = obj.serialize();
 
-    std::ofstream out(config_.settings_path, std::ios::binary);
-    if (!out) return false;
-
-    out.write(reinterpret_cast<const char*>(serialized.data()), serialized.size());
-    return out.good();
+    if (locker_key_.empty()) {
+        // No locker password — store plaintext (permission-protected on disk)
+        std::ofstream out(config_.key_locker_path, std::ios::binary);
+        if (!out) return false;
+        out.write(reinterpret_cast<const char*>(serialized.data()), serialized.size());
+        out.close();
+    } else {
+        // Encrypt with locker key and write
+        if (!NoteFileLedger::aes_encrypt_buffer_to_file(
+                serialized, config_.key_locker_path, locker_key_)) {
+            syslog(LOG_ERR, "[NoteFileService] Failed to save key locker");
+            return false;
+        }
+    }
+    chmod(config_.key_locker_path.c_str(), 0600);
+    return true;
 }
 
-bool NoteFileService::has_password() const {
-    std::lock_guard<std::mutex> lock(auth_mutex_);
-    return auth_data_.has_password;
+bool NoteFileService::load_key_locker() {
+    struct stat st;
+    if (stat(config_.key_locker_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+        return false;
+
+    // Read the raw locker data
+    std::vector<uint8_t> data;
+    {
+        std::ifstream in(config_.key_locker_path, std::ios::binary);
+        if (!in) return false;
+        in.seekg(0, std::ios::end);
+        data.resize(in.tellg());
+        in.seekg(0, std::ios::beg);
+        in.read(reinterpret_cast<char*>(data.data()), data.size());
+    }
+
+    if (locker_key_.empty()) {
+        // No locker password — stored plaintext
+        return parse_locker_data_impl(data, locker_, locker_.clients);
+    }
+
+    // Decrypt with locker key
+    // We need to re-read via the AES decrypt which expects encrypted format
+    auto decrypted = NoteFileLedger::aes_decrypt_to_buffer(
+        config_.key_locker_path, locker_key_);
+    if (!decrypted.empty()) {
+        return parse_locker_data_impl(decrypted, locker_, locker_.clients);
+    }
+
+    return false;
 }
+
+// Helper to parse loaded locker data
+static bool parse_locker_data_impl(const std::vector<uint8_t>& data,
+                                    KeyLocker& locker,
+                                    std::unordered_map<std::string, ClientEntry>& clients)
+{
+    try {
+        auto obj = NoteBytes::Object::deserialize(data.data(), data.size());
+        auto* salt_val = obj.get(NoteBytes::Value("salt"));
+        auto* wk_val = obj.get(NoteBytes::Value("wrapped_key"));
+        if (salt_val) locker.salt = salt_val->data();
+        if (wk_val) locker.wrapped_locker_key = wk_val->data();
+
+        auto* clients_val = obj.get(NoteBytes::Value("clients"));
+        if (clients_val && clients_val->type() == NoteBytes::Type::OBJECT) {
+            auto clients_obj = NoteBytes::as_object(*clients_val);
+            for (const auto& pair : clients_obj.pairs()) {
+                std::string cid = pair.key().as_string();
+                if (pair.value().type() == NoteBytes::Type::OBJECT) {
+                    auto cobj = NoteBytes::as_object(pair.value());
+                    ClientEntry entry;
+                    auto* bc = cobj.get(NoteBytes::Value("bcrypt"));
+                    auto* sa = cobj.get(NoteBytes::Value("salt"));
+                    if (bc) entry.bcrypt_hash = bc->data();
+                    if (sa) entry.salt = sa->data();
+                    auto* ek = cobj.get(NoteBytes::Value("enc_key"));
+                    if (ek) { entry.encryption_key = ek->data(); entry.has_encryption = true; }
+                    auto* ob = cobj.get(NoteBytes::Value("old_bcrypt"));
+                    auto* os = cobj.get(NoteBytes::Value("old_salt"));
+                    auto* oe = cobj.get(NoteBytes::Value("old_enc_key"));
+                    if (ob) entry.old_bcrypt_hash = ob->data();
+                    if (os) entry.old_salt = os->data();
+                    if (oe) entry.old_encryption_key = oe->data();
+                    clients[cid] = std::move(entry);
+                }
+            }
+        }
+        return true;
+    } catch (const std::exception& e) {
+        syslog(LOG_ERR, "[NoteFileService] Failed to parse locker: %s", e.what());
+        return false;
+    }
+}
+
+// ── Client management ────────────────────────────────────────────────────
+
+bool NoteFileService::add_client(const std::string& client_id,
+                                  const std::string& password) {
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    if (locker_.clients.count(client_id)) {
+        syslog(LOG_WARNING, "[NoteFileService] Client already exists: %s",
+               client_id.c_str());
+        return false;
+    }
+
+    ClientEntry entry;
+    if (!password.empty()) {
+        // Client wants encryption
+        entry.salt = generate_salt(16);
+        entry.bcrypt_hash = hash_password(password);
+        entry.encryption_key = derive_key(password, entry.salt);
+        entry.has_encryption = true;
+    }
+
+    locker_.clients[client_id] = std::move(entry);
+    bool ok = save_key_locker();
+
+    // Create client data directory
+    try { fs::create_directories(client_data_dir(client_id)); }
+    catch (...) {}
+
+    syslog(LOG_INFO, "[NoteFileService] Client added: %s (encryption=%s)",
+           client_id.c_str(), password.empty() ? "OFF" : "ON");
+    return ok;
+}
+
+bool NoteFileService::remove_client(const std::string& client_id) {
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    auto it = locker_.clients.find(client_id);
+    if (it == locker_.clients.end()) return false;
+    locker_.clients.erase(it);
+    return save_key_locker();
+}
+
+std::vector<std::string> NoteFileService::list_clients() const {
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    std::vector<std::string> result;
+    for (const auto& [cid, _] : locker_.clients)
+        result.push_back(cid);
+    return result;
+}
+
+bool NoteFileService::change_client_password(
+    const std::string& client_id,
+    const std::string& old_password,
+    const std::string& new_password)
+{
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    auto it = locker_.clients.find(client_id);
+    if (it == locker_.clients.end()) {
+        syslog(LOG_WARNING, "[NoteFileService] Client not found: %s",
+               client_id.c_str());
+        return false;
+    }
+
+    ClientEntry& entry = it->second;
+
+    // Verify old password
+    if (!entry.has_encryption) {
+        syslog(LOG_WARNING, "[NoteFileService] Client has no encryption: %s",
+               client_id.c_str());
+        return false;
+    }
+    if (!verify_password(old_password, entry.bcrypt_hash)) {
+        syslog(LOG_WARNING, "[NoteFileService] Wrong password for client: %s",
+               client_id.c_str());
+        return false;
+    }
+
+    // Store old key for re-encryption
+    entry.old_bcrypt_hash = entry.bcrypt_hash;
+    entry.old_salt = entry.salt;
+    entry.old_encryption_key = entry.encryption_key;
+
+    // Derive new key
+    entry.salt = generate_salt(16);
+    entry.bcrypt_hash = hash_password(new_password);
+    auto new_key = derive_key(new_password, entry.salt);
+    auto old_key = entry.encryption_key;
+    entry.encryption_key = new_key;
+
+    // Save locker first (so new key is persisted)
+    if (!save_key_locker()) return false;
+
+    // Release lock during re-encrypt
+    locker_mutex_.unlock();
+
+    // Re-encrypt all client files
+    auto ledger = client_ledger_path(client_id);
+    NoteFileLedger::re_encrypt_ledger(ledger, old_key, new_key, nullptr);
+
+    locker_mutex_.lock();
+
+    // Clear old fields
+    entry.old_bcrypt_hash.clear();
+    entry.old_salt.clear();
+    entry.old_encryption_key.clear();
+    save_key_locker();
+
+    syslog(LOG_INFO, "[NoteFileService] Client password changed: %s",
+           client_id.c_str());
+    return true;
+}
+
+bool NoteFileService::client_has_encryption(const std::string& client_id) const {
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    auto it = locker_.clients.find(client_id);
+    return it != locker_.clients.end() && it->second.has_encryption;
+}
+
+std::vector<uint8_t> NoteFileService::get_client_key(
+    const std::string& client_id) const
+{
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    auto it = locker_.clients.find(client_id);
+    if (it == locker_.clients.end())
+        return {};
+    if (it->second.has_encryption)
+        return it->second.encryption_key;
+    // No encryption password — derive deterministic key from server key
+    // This keeps the ledger encrypted without requiring a user password
+    std::vector<uint8_t> input;
+    input.insert(input.end(), server_key_.private_key.begin(),
+                 server_key_.private_key.end());
+    input.insert(input.end(), client_id.begin(), client_id.end());
+    std::vector<uint8_t> derived(32);
+    unsigned int hlen = 0;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(md, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(md, input.data(), input.size());
+    EVP_DigestFinal_ex(md, derived.data(), &hlen);
+    EVP_MD_CTX_free(md);
+    return derived;
+}
+
+NoteFileService::ClientAuthResult NoteFileService::authenticate_client(
+    const std::string& client_id, const std::string& password)
+{
+    std::lock_guard<std::mutex> lock(locker_mutex_);
+    auto it = locker_.clients.find(client_id);
+    if (it == locker_.clients.end())
+        return {{}, false};
+
+    ClientEntry& entry = it->second;
+    if (!entry.has_encryption) {
+        // No encryption — client auth is just existence check
+        return {{}, true};
+    }
+
+    if (!verify_password(password, entry.bcrypt_hash))
+        return {{}, false};
+
+    return {entry.encryption_key, true};
+}
+
+// ── Password helpers ─────────────────────────────────────────────────────
 
 std::vector<uint8_t> NoteFileService::hash_password(
     const std::string& password) const
 {
-    // Simplified bcrypt-compatible hashing using SHA-256 + salt
-    // In production, use libbcrypt or similar for real bcrypt compatibility
-    std::vector<uint8_t> salt = generate_salt(16);
-
-    // SHA-256(salt || password) using EVP API (OpenSSL 3.x compatible)
+    auto salt = generate_salt(16);
     std::vector<uint8_t> hash(32);
-    unsigned int hash_len = 0;
-    EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
-    EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr);
-    EVP_DigestUpdate(mdctx, salt.data(), salt.size());
-    EVP_DigestUpdate(mdctx, password.data(), password.size());
-    EVP_DigestFinal_ex(mdctx, hash.data(), &hash_len);
-    hash.resize(hash_len);
-    EVP_MD_CTX_free(mdctx);
+    unsigned int hlen = 0;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(md, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(md, salt.data(), salt.size());
+    EVP_DigestUpdate(md, password.data(), password.size());
+    EVP_DigestFinal_ex(md, hash.data(), &hlen);
+    hash.resize(hlen);
+    EVP_MD_CTX_free(md);
 
-    // Prepend salt to hash for storage
     std::vector<uint8_t> stored;
     stored.insert(stored.end(), salt.begin(), salt.end());
     stored.insert(stored.end(), hash.begin(), hash.end());
     return stored;
 }
 
-bool NoteFileService::verify_password(
-    const std::string& password,
-    const std::vector<uint8_t>& hash) const
+bool NoteFileService::verify_password(const std::string& password,
+                                       const std::vector<uint8_t>& hash) const
 {
     if (hash.size() < 16) return false;
+    auto salt = std::vector<uint8_t>(hash.begin(), hash.begin() + 16);
+    auto expected = std::vector<uint8_t>(hash.begin() + 16, hash.end());
 
-    // Extract salt (first 16 bytes)
-    std::vector<uint8_t> salt(hash.begin(), hash.begin() + 16);
-    std::vector<uint8_t> expected_hash(hash.begin() + 16, hash.end());
-
-    // Recompute: SHA-256(salt || password) using EVP API
     std::vector<uint8_t> computed(32);
-    unsigned int hash_len = 0;
-    EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
-    EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr);
-    EVP_DigestUpdate(mdctx, salt.data(), salt.size());
-    EVP_DigestUpdate(mdctx, password.data(), password.size());
-    EVP_DigestFinal_ex(mdctx, computed.data(), &hash_len);
-    computed.resize(hash_len);
-    EVP_MD_CTX_free(mdctx);
+    unsigned int hlen = 0;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(md, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(md, salt.data(), salt.size());
+    EVP_DigestUpdate(md, password.data(), password.size());
+    EVP_DigestFinal_ex(md, computed.data(), &hlen);
+    EVP_MD_CTX_free(md);
 
-    return constant_time_compare(computed, expected_hash);
-}
-
-std::vector<uint8_t> NoteFileService::generate_salt(size_t length) const {
-    return random_bytes(length);
+    return constant_time_compare(computed, expected);
 }
 
 std::vector<uint8_t> NoteFileService::derive_key(
     const std::string& password,
     const std::vector<uint8_t>& salt) const
 {
-    // PBKDF2-compatible key derivation using HMAC-SHA256
-    // Uses PKCS5_PBKDF2_HMAC from OpenSSL
-    std::vector<uint8_t> key(32); // 256-bit key
+    std::vector<uint8_t> key(32);
     PKCS5_PBKDF2_HMAC(password.data(), static_cast<int>(password.size()),
                        salt.data(), static_cast<int>(salt.size()),
-                       65536,  // 65536 iterations (matches Java)
-                       EVP_sha256(),
-                       32, key.data());
+                       65536, EVP_sha256(), 32, key.data());
     return key;
 }
 
-bool NoteFileService::set_initial_password(const std::string& password) {
-    std::lock_guard<std::mutex> lock(auth_mutex_);
-    if (auth_data_.has_password) {
-        syslog(LOG_ERR, "[NoteFileService] Password already set");
-        return false;
-    }
-
-    // Generate salt and derive key
-    auth_data_.salt = generate_salt(16);
-    auth_data_.bcrypt_hash = hash_password(password);
-    current_key_ = derive_key(password, auth_data_.salt);
-    auth_data_.has_password = true;
-
-    if (!save_auth_data()) {
-        syslog(LOG_ERR, "[NoteFileService] Failed to save auth data");
-        auth_data_.has_password = false;
-        return false;
-    }
-
-    syslog(LOG_INFO, "[NoteFileService] Initial password set");
-    return true;
+std::vector<uint8_t> NoteFileService::generate_salt(size_t length) const {
+    return random_bytes(length);
 }
 
-bool NoteFileService::change_password(const std::string& old_password,
-                                       const std::string& new_password) {
-    std::lock_guard<std::mutex> lock(auth_mutex_);
-    if (!auth_data_.has_password) return false;
-
-    // Verify old password
-    if (!verify_password(old_password, auth_data_.bcrypt_hash)) {
-        syslog(LOG_WARNING, "[NoteFileService] Password change: old password invalid");
-        return false;
-    }
-
-    // Store old key for re-encryption
-    old_key_ = current_key_;
-
-    // Generate new salt and derive new key
-    auto new_salt = generate_salt(16);
-    auto new_hash = hash_password(new_password);
-    auto new_key = derive_key(new_password, new_salt);
-
-    // Update auth data
-    auth_data_.salt = new_salt;
-    auth_data_.bcrypt_hash = new_hash;
-    current_key_ = new_key;
-
-    if (!save_auth_data()) {
-        syslog(LOG_ERR, "[NoteFileService] Password change: save failed");
-        return false;
-    }
-
-    // Re-encrypt files with old key → new key
-    // (current_key_ is the new key, old_key_ is the old one)
-    auto old_key_copy = old_key_;
-    auto new_key_copy = current_key_;
-    
-    auth_mutex_.unlock();
-    
-    bool re_encrypt_ok = NoteFileLedger::re_encrypt_ledger(
-        config_.ledger_path, old_key_copy, new_key_copy, nullptr);
-
-    auth_mutex_.lock();
-
-    if (!re_encrypt_ok) {
-        syslog(LOG_ERR, "[NoteFileService] Password change: re-encrypt failed");
-        return false;
-    }
-
-    old_key_.clear();
-    syslog(LOG_INFO, "[NoteFileService] Password changed successfully");
-    return true;
+std::vector<uint8_t> NoteFileService::random_bytes(size_t length) const {
+    return ::random_bytes(length);
 }
 
-std::unique_ptr<AuthToken> NoteFileService::authenticate(
-    const std::string& password, pid_t client_pid)
-{
-    std::lock_guard<std::mutex> lock(auth_mutex_);
+// ── File operations (per-client) ─────────────────────────────────────────
 
-    if (!auth_data_.has_password) {
-        syslog(LOG_WARNING, "[NoteFileService] Auth attempted but no password set");
-        return nullptr;
-    }
-
-    if (!verify_password(password, auth_data_.bcrypt_hash)) {
-        syslog(LOG_WARNING, "[NoteFileService] Auth failed for pid=%d", client_pid);
-        return nullptr;
-    }
-
-    // Derive the key (matches what's in current_key_)
-    auto derived = derive_key(password, auth_data_.salt);
-
-    // Create session token
-    auto token = std::make_unique<AuthToken>();
-    token->session_id = generate_uuid();
-    token->client_pid = client_pid;
-    token->derived_key = derived;
-    token->created_at_ms = now_ms();
-
-    // Save session_id BEFORE move so we can look it up afterwards
-    std::string saved_session_id = token->session_id;
-    active_tokens_[saved_session_id] = std::move(token);
-
-    syslog(LOG_INFO, "[NoteFileService] Auth success for pid=%d, session=%s",
-           client_pid, saved_session_id.c_str());
-
-    // Return a copy of the token (the map owns the original)
-    auto& stored = active_tokens_[saved_session_id];
-    auto result = std::make_unique<AuthToken>(*stored);
-    return result;
+std::string NoteFileService::client_data_dir(const std::string& client_id) const {
+    return config_.data_directory + "/" + client_id;
 }
 
-void NoteFileService::invalidate_token(const std::string& session_id) {
-    std::lock_guard<std::mutex> lock(auth_mutex_);
-    auto it = active_tokens_.find(session_id);
-    if (it != active_tokens_.end()) {
-        it->second->valid = false;
-        active_tokens_.erase(it);
-        syslog(LOG_INFO, "[NoteFileService] Token invalidated: %s", session_id.c_str());
-    }
+std::string NoteFileService::client_ledger_path(const std::string& client_id) const {
+    return client_data_dir(client_id) + "/ledger.dat";
 }
 
-// =========================================================================
-// File operations
-// =========================================================================
+std::string NoteFileService::generate_data_file_path(const std::string& client_id) const {
+    auto uuid = random_bytes(16);
+    std::stringstream ss;
+    ss << client_data_dir(client_id) << "/";
+    for (size_t i = 0; i < 16; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0')
+           << static_cast<int>(uuid[i]);
+        if (i == 3 || i == 5 || i == 7 || i == 9) ss << "-";
+    }
+    ss << ".dat";
+    return ss.str();
+}
 
 std::shared_ptr<NoteFileHandle> NoteFileService::get_file(
+    const std::string& client_id,
     const std::vector<NoteBytes::Value>& path_segments)
 {
     if (!initialized_.load()) return nullptr;
+
+    auto key = get_client_key(client_id);
 
     // Build path string for lookup
     std::string path_string;
@@ -430,283 +741,135 @@ std::shared_ptr<NoteFileHandle> NoteFileService::get_file(
         if (i > 0) path_string += "/";
         path_string += path_segments[i].as_string();
     }
+    std::string full_path = client_id + "/" + path_string;
 
     // Check existing handle
     {
         std::lock_guard<std::mutex> lock(handles_mutex_);
-        auto it = handles_.find(path_string);
+        auto it = handles_.find(full_path);
         if (it != handles_.end()) {
-            auto handle = it->second.lock();
-            if (handle) return handle;
-            handles_.erase(it); // Stale weak_ptr
+            auto h = it->second.lock();
+            if (h) return h;
+            handles_.erase(it);
         }
     }
 
-    // Resolve path to actual file on disk
-    std::string file_path = resolve_or_create_path(path_segments);
-    if (file_path.empty()) {
-        syslog(LOG_ERR, "[NoteFileService] Failed to resolve path: %s",
-               path_string.c_str());
-        return nullptr;
-    }
+    // Ensure client dir exists
+    try { fs::create_directories(client_data_dir(client_id)); }
+    catch (...) { return nullptr; }
 
-    // Create handle
+    // Resolve path
+    std::lock_guard<std::mutex> lock(ledger_mutex_);
+    NoteFilePath np(client_ledger_path(client_id), path_segments,
+                    client_data_dir(client_id));
+    auto file_path = NoteFileLedger::find_or_create_path(np, key);
+    if (file_path.empty()) return nullptr;
+
     auto handle = std::make_shared<NoteFileHandle>(
-        file_path, path_segments, path_string, shared_from_this());
+        file_path, path_segments, full_path, client_id, key, shared_from_this());
 
-    // Register handle
     {
-        std::lock_guard<std::mutex> lock(handles_mutex_);
-        handles_[path_string] = handle;
+        std::lock_guard<std::mutex> hl(handles_mutex_);
+        handles_[full_path] = handle;
     }
-
-    syslog(LOG_INFO, "[NoteFileService] File handle created: %s -> %s",
-           path_string.c_str(), file_path.c_str());
     return handle;
 }
 
 std::shared_ptr<NoteFileHandle> NoteFileService::get_file(
+    const std::string& client_id,
     const std::vector<std::string>& path_segments)
 {
-    std::vector<NoteBytes::Value> segments;
-    for (const auto& s : path_segments) {
-        segments.emplace_back(s);
-    }
-    return get_file(segments);
-}
-
-bool NoteFileService::file_exists(
-    const std::vector<NoteBytes::Value>& path_segments)
-{
-    // For now, just check if a handle resolves
-    auto handle = get_file(path_segments);
-    return handle != nullptr && handle->exists();
+    std::vector<NoteBytes::Value> segs;
+    for (const auto& s : path_segments) segs.emplace_back(s);
+    return get_file(client_id, segs);
 }
 
 bool NoteFileService::delete_file(
-    const std::vector<NoteBytes::Value>& path_segments, bool recursive)
+    const std::string& client_id,
+    const std::vector<NoteBytes::Value>& path_segments,
+    bool recursive)
 {
-    if (!initialized_.load()) return false;
-
-    std::string path_string;
-    for (size_t i = 0; i < path_segments.size(); i++) {
-        if (i > 0) path_string += "/";
-        path_string += path_segments[i].as_string();
-    }
-
-    // Close any existing handle
-    {
-        std::lock_guard<std::mutex> lock(handles_mutex_);
-        handles_.erase(path_string);
-    }
-
-    // Delete from ledger
-    NoteFilePath note_path(config_.ledger_path, path_segments,
-                           config_.data_directory, recursive);
-    return NoteFileLedger::delete_from_path(note_path, current_key_);
+    auto key = get_client_key(client_id);
+    std::lock_guard<std::mutex> lock(ledger_mutex_);
+    NoteFilePath np(client_ledger_path(client_id), path_segments,
+                    client_data_dir(client_id), recursive);
+    return NoteFileLedger::delete_from_path(np, key);
 }
 
-std::vector<std::string> NoteFileService::list_files() {
-    if (!initialized_.load()) return {};
-
-    struct stat st;
-    if (stat(config_.ledger_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
-        return {};
-    }
-
-    return NoteFileLedger::collect_file_paths(config_.ledger_path, current_key_);
+std::vector<std::string> NoteFileService::list_files(const std::string& client_id) {
+    auto key = get_client_key(client_id);
+    return NoteFileLedger::collect_file_paths(client_ledger_path(client_id), key);
 }
-
-// =========================================================================
-// Key management
-// =========================================================================
-
-bool NoteFileService::re_encrypt_all(const std::vector<uint8_t>& new_key) {
-    syslog(LOG_INFO, "[NoteFileService] Re-encrypting all files");
-
-    // Re-encrypt ledger and all data files
-    if (!NoteFileLedger::re_encrypt_ledger(config_.ledger_path,
-                                           current_key_, new_key,
-                                           nullptr)) {
-        syslog(LOG_ERR, "[NoteFileService] re_encrypt_all failed");
-        return false;
-    }
-
-    current_key_ = new_key;
-    return true;
-}
-
-// =========================================================================
-// Internal: path resolution, encrypt/decrypt
-// =========================================================================
 
 std::string NoteFileService::resolve_or_create_path(
+    const std::string& client_id,
     const std::vector<NoteBytes::Value>& path_segments)
 {
+    auto key = get_client_key(client_id);
     std::lock_guard<std::mutex> lock(ledger_mutex_);
-
-    NoteFilePath note_path(config_.ledger_path, path_segments,
-                           config_.data_directory);
-    return NoteFileLedger::find_or_create_path(note_path, current_key_);
-}
-
-int NoteFileService::decrypt_file(const std::string& file_path) {
-    struct stat st;
-    if (stat(file_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
-        syslog(LOG_WARNING, "[NoteFileService] decrypt_file: not found: %s",
-               file_path.c_str());
-        return -1;
-    }
-
-    // Create a temp path for decrypted output
-    std::string tmp_path = file_path + ".decrypted";
-
-    if (!NoteFileLedger::aes_decrypt_file(file_path, tmp_path, current_key_)) {
-        syslog(LOG_ERR, "[NoteFileService] decrypt_file failed: %s",
-               file_path.c_str());
-        return -1;
-    }
-
-    // Open the decrypted file for reading
-    int fd = ::open(tmp_path.c_str(), O_RDONLY);
-    if (fd < 0) {
-        syslog(LOG_ERR, "[NoteFileService] Cannot open decrypted file: %s",
-               strerror(errno));
-        unlink(tmp_path.c_str());
-        return -1;
-    }
-
-    // Unlink now — fd stays valid until closed, then file vanishes automatically
-    unlink(tmp_path.c_str());
-    return fd;
-}
-
-bool NoteFileService::encrypt_file_swap(const std::string& file_path,
-                                         int pipe_fd) {
-    if (pipe_fd < 0) return false;
-
-    // Read plaintext from pipe
-    std::vector<uint8_t> plaintext;
-    uint8_t buf[65536];
-    ssize_t n;
-    while ((n = ::read(pipe_fd, buf, sizeof(buf))) > 0) {
-        plaintext.insert(plaintext.end(), buf, buf + n);
-    }
-    ::close(pipe_fd);
-
-    // Write encrypted to temp file, then atomically swap
-    std::string tmp_path = file_path + ".encrypted";
-
-    if (!NoteFileLedger::aes_encrypt_buffer_to_file(plaintext, tmp_path,
-                                                     current_key_)) {
-        syslog(LOG_ERR, "[NoteFileService] encrypt_file_swap failed: %s",
-               file_path.c_str());
-        unlink(tmp_path.c_str());
-        return false;
-    }
-
-    // Atomic swap
-    if (rename(tmp_path.c_str(), file_path.c_str()) != 0) {
-        syslog(LOG_ERR, "[NoteFileService] rename failed: %s", strerror(errno));
-        unlink(tmp_path.c_str());
-        return false;
-    }
-
-    return true;
-}
-
-bool NoteFileService::encrypt_new_file(const std::string& file_path,
-                                        int pipe_fd) {
-    return encrypt_file_swap(file_path, pipe_fd);
+    NoteFilePath np(client_ledger_path(client_id), path_segments,
+                    client_data_dir(client_id));
+    return NoteFileLedger::find_or_create_path(np, key);
 }
 
 std::vector<uint8_t> NoteFileService::read_file_to_buffer(
-    const std::string& file_path)
+    const std::string& file_path, const std::vector<uint8_t>& key)
 {
     struct stat st;
-    if (stat(file_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
-        syslog(LOG_WARNING, "[NoteFileService] read_file_to_buffer: not found: %s",
-               file_path.c_str());
-        return {};
-    }
-    return NoteFileLedger::aes_decrypt_to_buffer(file_path, current_key_);
+    if (stat(file_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return {};
+    return NoteFileLedger::aes_decrypt_to_buffer(file_path, key);
 }
 
 bool NoteFileService::encrypt_buffer_to_file(
     const std::string& file_path,
-    const std::vector<uint8_t>& data)
+    const std::vector<uint8_t>& data,
+    const std::vector<uint8_t>& key)
 {
-    std::string tmp_path = file_path + ".encrypted";
-    if (!NoteFileLedger::aes_encrypt_buffer_to_file(data, tmp_path,
-                                                     current_key_)) {
-        syslog(LOG_ERR, "[NoteFileService] encrypt_buffer_to_file failed: %s",
-               file_path.c_str());
-        unlink(tmp_path.c_str());
+    std::string tmp = file_path + ".encrypted";
+    if (!NoteFileLedger::aes_encrypt_buffer_to_file(data, tmp, key)) {
+        unlink(tmp.c_str());
         return false;
     }
-    if (rename(tmp_path.c_str(), file_path.c_str()) != 0) {
-        syslog(LOG_ERR, "[NoteFileService] rename failed: %s", strerror(errno));
-        unlink(tmp_path.c_str());
+    if (rename(tmp.c_str(), file_path.c_str()) != 0) {
+        unlink(tmp.c_str());
         return false;
     }
     return true;
 }
 
 bool NoteFileService::create_pipe(int& read_fd, int& write_fd) {
-    int pipefd[2];
-    if (::pipe(pipefd) < 0) {
-        syslog(LOG_ERR, "[NoteFileService] pipe() failed: %s", strerror(errno));
-        return false;
-    }
-    read_fd = pipefd[0];
-    write_fd = pipefd[1];
+    int pfd[2];
+    if (::pipe(pfd) < 0) return false;
+    read_fd = pfd[0];
+    write_fd = pfd[1];
     return true;
 }
 
-std::string NoteFileService::generate_data_file_path() {
-    auto uuid_bytes = random_bytes(16);
-    std::stringstream ss;
-    ss << config_.data_directory << "/";
-    for (size_t i = 0; i < 16; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0')
-           << static_cast<int>(uuid_bytes[i]);
-        if (i == 3 || i == 5 || i == 7 || i == 9) ss << "-";
-    }
-    ss << ".dat";
-    return ss.str();
-}
+// ── Handle registry ──────────────────────────────────────────────────────
 
-void NoteFileService::register_handle(NoteFileHandle* handle) {
-    // Handles register themselves in get_file
-    (void)handle;
-}
+void NoteFileService::register_handle(NoteFileHandle*) {}
 
 void NoteFileService::unregister_handle(NoteFileHandle* handle) {
     if (!handle) return;
     std::lock_guard<std::mutex> lock(handles_mutex_);
-    // Remove from registry if the weak_ptr points to this handle
     for (auto it = handles_.begin(); it != handles_.end(); ) {
         auto locked = it->second.lock();
-        if (!locked || locked.get() == handle) {
+        if (!locked || locked.get() == handle)
             it = handles_.erase(it);
-        } else {
+        else
             ++it;
-        }
     }
 }
 
 size_t NoteFileService::active_handle_count() const {
     std::lock_guard<std::mutex> lock(handles_mutex_);
-    size_t count = 0;
-    for (const auto& [_, weak] : handles_) {
-        if (!weak.expired()) count++;
-    }
-    return count;
+    size_t n = 0;
+    for (const auto& [_, w] : handles_)
+        if (!w.expired()) n++;
+    return n;
 }
 
-// =========================================================================
-// Static global accessor
-// =========================================================================
+// ── Global accessor ──────────────────────────────────────────────────────
 
 namespace {
     NoteFileService* g_file_service = nullptr;

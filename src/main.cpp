@@ -311,7 +311,7 @@ public:
             NoteFileConfig file_config;
             file_config.data_directory = paths_.root + "/data/files";
             file_config.ledger_path = paths_.root + "/data/ledger.dat";
-            file_config.settings_path = paths_.root + "/data/settings.dat";
+            file_config.key_locker_path = paths_.root + "/key_locker.dat";
             
             file_service_ = std::make_unique<NoteFileService>(file_config);
             if (file_service_->init()) {
@@ -1115,20 +1115,16 @@ private:
   }
 
   // ── NoteFile / Auth core handlers ──────────────────────────────────
-  if (msg_type == "auth") {
+  if (msg_type == "admin_auth") {
     handle_note_file_auth(reply_fd, msg, client_pid);
     return;
   }
-  if (msg_type == "set_password") {
+  if (msg_type == "set_admin_api_key") {
     handle_note_file_set_password(reply_fd, msg, client_pid);
     return;
   }
-  if (msg_type == "change_password") {
+  if (msg_type == "set_locker_pw") {
     handle_note_file_change_password(reply_fd, msg, client_pid);
-    return;
-  }
-  if (msg_type == "query_files") {
-    handle_note_file_query_files(reply_fd, msg, client_pid);
     return;
   }
   if (msg_type == "get_file") {
@@ -1404,7 +1400,7 @@ private:
                       "File service not initialized");
             return;
         }
-        auto token = svc->authenticate(pass_val->as_string(), client_pid);
+        auto token = svc->authenticate_admin(pass_val->as_string(), client_pid);
         if (!token) {
             send_error(reply_fd, NoteMessaging::ErrorCodes::UNAUTHORIZED,
                       "Authentication failed");
@@ -1415,7 +1411,7 @@ private:
         response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
         response.add(NoteBytes::Value("session_id"), token->session_id);
         response.add(NoteBytes::Value("has_password"),
-                     NoteBytes::Value(svc->has_password()));
+                     NoteBytes::Value(svc->has_locker_password()));
         write_to_fd(reply_fd, response);
         syslog(LOG_INFO, "[Auth] Client pid=%d authenticated, session=%s",
                client_pid, token->session_id.c_str());
@@ -1435,7 +1431,7 @@ private:
                       "Service not available");
             return;
         }
-        if (!svc->set_initial_password(pass_val->as_string())) {
+        if (!svc->set_locker_password(pass_val->as_string())) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
                       "Failed to set password (may already be set)");
             return;
@@ -1462,7 +1458,7 @@ private:
                       "Service not available");
             return;
         }
-        if (!svc->change_password(old_val->as_string(), new_val->as_string())) {
+        if (!svc->change_locker_password(old_val->as_string(), new_val->as_string())) {
             send_error(reply_fd, NoteMessaging::ErrorCodes::UNAUTHORIZED,
                       "Password change failed (wrong old password?)");
             return;
@@ -1483,7 +1479,7 @@ private:
                       "Service not available");
             return;
         }
-        auto files = svc->list_files();
+        auto files = svc->list_files("");
         NoteBytes::Object response;
         response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_list"));
         NoteBytes::Array arr;
@@ -1521,7 +1517,7 @@ private:
         if (start < path_str.size())
             segments.push_back(path_str.substr(start));
 
-        auto handle = svc->get_file(segments);
+        auto handle = svc->get_file("", segments);
         if (!handle) {
             send_error(reply_fd, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
                       "File not found: " + path_str);
@@ -1564,7 +1560,7 @@ private:
         if (start < path_str.size())
             segments.push_back(path_str.substr(start));
 
-        auto handle = svc->get_file(segments);
+        auto handle = svc->get_file("", segments);
         if (!handle) {
             send_error(reply_fd, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
                       "Cannot create file: " + path_str);
@@ -1621,7 +1617,7 @@ private:
         std::vector<NoteBytes::Value> nb_segments;
         for (const auto& s : segments) nb_segments.emplace_back(s);
 
-        if (!svc->delete_file(nb_segments, recursive)) {
+        if (!svc->delete_file("", nb_segments, recursive)) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
                       "Failed to delete: " + path_str);
             return;

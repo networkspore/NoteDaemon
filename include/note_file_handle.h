@@ -87,22 +87,32 @@ public:
     void close();
     void force_close();
 
+    /** Client ID for per-client encryption. */
+    const std::string& client_id() const { return client_id_; }
+
+    /** Get the encryption key used by this handle (empty = no encryption). */
+    const std::vector<uint8_t>& encryption_key() const { return encryption_key_; }
+
+    /** Whether this handle uses encryption. */
+    bool has_encryption() const { return !encryption_key_.empty(); }
+
     // Public so std::make_shared can access it
     NoteFileHandle(std::string file_path,
                    std::vector<NoteBytes::Value> path_segments,
                    std::string path_string,
+                   std::string client_id,
+                   std::vector<uint8_t> encryption_key,
                    std::shared_ptr<NoteFileService> service);
 
 private:
     friend class NoteFileService;
     const std::string& file_path() const { return file_path_; }
-    int begin_read_pipe();
-    int begin_write_pipe();
-    bool commit_write(int pipe_fd);
 
     std::string file_path_;
     std::vector<NoteBytes::Value> path_segments_;
     std::string path_string_;
+    std::string client_id_;
+    std::vector<uint8_t> encryption_key_;
     std::weak_ptr<NoteFileService> service_;
     std::atomic<bool> closed_{false};
     std::mutex operation_mutex_;
