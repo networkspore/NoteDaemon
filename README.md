@@ -99,6 +99,12 @@ Use for large files, real-time data, WebRTC transport.
 Full protocol specification with examples:
 [NoteBytes Wire Protocol Format](protocol_wire_format.md)
 
+### Client Usage
+
+See the [Protocol doc](protocol_wire_format.md#client-usage-examples) for
+Python and Java client examples covering the full lifecycle:
+admin setup → client creation → auth → file write/read → streaming.
+
 ### Modules
 
 Loadable .so modules extend the daemon:

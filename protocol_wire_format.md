@@ -450,6 +450,122 @@ and renames on completion.
 
 ---
 
+## Client Usage Examples
+
+### Python
+
+```python
+import socket, struct
+
+class NoteFileClient:
+    """Minimal client for the NoteFile protocol over Unix socket."""
+
+    def __init__(self, socket_path):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(socket_path)
+
+    def _send_obj(self, pairs):
+        """Send a NoteBytes OBJECT with string key-value pairs."""
+        body = b''
+        for key, val in pairs:
+            # Key: STRING type
+            body += struct.pack('>B', 11) + struct.pack('>I', len(key)) + key.encode()
+            # Value: STRING for text, RAW_BYTES (0) for binary
+            if isinstance(val, str):
+                body += struct.pack('>B', 11) + struct.pack('>I', len(val)) + val.encode()
+            else:
+                body += struct.pack('>B', 0) + struct.pack('>I', len(val)) + val
+        self.sock.send(struct.pack('>B', 12) + struct.pack('>I', len(body)) + body)
+
+    def _recv_val(self):
+        """Read one NoteBytes value, return payload bytes."""
+        hdr = self.sock.recv(5)
+        if not hdr:
+            return None
+        length = struct.unpack('>I', hdr[1:5])[0]
+        return self.sock.recv(length)
+
+    def _get_field(self, payload, field):
+        """Extract a string field from a NoteBytes OBJECT payload."""
+        pos = 0
+        while pos < len(payload):
+            klen = struct.unpack('>I', payload[pos+1:pos+5])[0]
+            key = payload[pos+5:pos+5+klen].decode()
+            if key == field:
+                vlen = struct.unpack('>I', payload[pos+6+klen:pos+10+klen])[0]
+                return payload[pos+10+klen:pos+10+klen+vlen]
+            pos += 5 + klen + 5 + struct.unpack('>I', payload[pos+6+klen:pos+10+klen])[0]
+        return None
+
+    def cmd(self, **kwargs):
+        """Send a command and return the response payload."""
+        self._send_obj(list(kwargs.items()))
+        return self._recv_val()
+
+    def status(self, resp):
+        """Extract the 'status' field from a response."""
+        return self._get_field(resp, b'status')
+
+    def close(self):
+        self.sock.close()
+
+
+# ── Full lifecycle example ──────────────────────────────────────────
+
+client = NoteFileClient('/var/run/netnotes/notedaemon.sock')
+
+# 1. Admin setup (first boot, one-time)
+r = client.cmd(event='set_admin_api_key', password='sk-admin-001')
+assert client.status(r) == b'ok'
+
+# 2. Admin authenticates
+r = client.cmd(event='admin_auth', password='sk-admin-001')
+session = client._get_field(r, b'session_id').decode()
+print(f'Admin session: {session}')
+
+# 3. Admin creates clients
+r = client.cmd(event='add_client', client_id='alice', api_key='sk-alice-001')
+assert client.status(r) == b'ok'
+r = client.cmd(event='add_client', client_id='bob', api_key='sk-bob-001')
+assert client.status(r) == b'ok'
+
+# 4. Client authenticates
+r = client.cmd(event='client_auth', client_id='alice', api_key='sk-alice-001')
+assert client._get_field(r, b'session_id') is not None
+
+# 5. Write a file (data is a NoteBytes Object serialized as raw pairs)
+config = struct.pack('>B',11) + struct.pack('>I',5)  + b'theme'  \
+       + struct.pack('>B',11) + struct.pack('>I',4)  + b'dark'   \
+       + struct.pack('>B',11) + struct.pack('>I',4)  + b'lang'   \
+       + struct.pack('>B',11) + struct.pack('>I',2)  + b'en'
+r = client.cmd(event='put_file', client_id='alice',
+                path='apps/config/settings', data=config)
+assert client.status(r) == b'ok'
+
+# 6. Read the file back
+r = client.cmd(event='get_file', client_id='alice', path='apps/config/settings')
+data = client._get_field(r, b'data')
+theme = client._get_field(data, b'theme') if data else None
+print(f'Theme: {theme.decode() if theme else "N/A"}')
+
+# 7. Open a streaming read session
+r = client.cmd(event='open_file_stream', client_id='alice',
+               path='apps/config/settings', mode='read')
+stream_id = client._get_field(r, b'stream_id').decode()
+print(f'Stream: {stream_id}')  # "alice:<uuid>"
+
+# 8. Delete the file
+r = client.cmd(event='delete_file', client_id='alice', path='apps/config/settings')
+assert client.status(r) == b'ok'
+
+client.close()
+```
+
+### Java (using raw socket, same protocol)
+
+See [IODemo/NoteFileTest.java](https://github.com/networkspore/NoteDaemon/blob/master/../IODemo/src/main/java/io/netnotes/demo/NoteFileTest.java)
+for a complete Java implementation of the same lifecycle.
+
 ### Path Resolution
 
 Each client has a hierarchical **ledger** file at `data/clients/<id>/.ledger`.
