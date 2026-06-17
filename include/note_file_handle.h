@@ -91,7 +91,7 @@ public:
                    std::string path_string,
                    std::string client_id,
                    std::vector<uint8_t> encryption_key,
-                   std::shared_ptr<NoteFileService> service);
+                   NoteFileService* service);
 
 private:
     friend class NoteFileService;
@@ -102,7 +102,7 @@ private:
     std::string path_string_;
     std::string client_id_;
     std::vector<uint8_t> encryption_key_;
-    std::weak_ptr<NoteFileService> service_;
+    NoteFileService* service_;
     std::atomic<bool> closed_{false};
     std::mutex operation_mutex_;
 };

@@ -20,7 +20,7 @@ NoteFileHandle::NoteFileHandle(
     std::string path_string,
     std::string client_id,
     std::vector<uint8_t> encryption_key,
-    std::shared_ptr<NoteFileService> service)
+    NoteFileService* service)
     : file_path_(std::move(file_path))
     , path_segments_(std::move(path_segments))
     , path_string_(std::move(path_string))
@@ -43,12 +43,12 @@ bool NoteFileHandle::exists() const {
 
 void NoteFileHandle::close() {
     if (closed_.exchange(true)) return;
-    if (auto svc = service_.lock()) svc->unregister_handle(this);
+    if (service_) service_->unregister_handle(this);
 }
 
 void NoteFileHandle::force_close() {
     closed_.store(true);
-    if (auto svc = service_.lock()) svc->unregister_handle(this);
+    if (service_) service_->unregister_handle(this);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -58,7 +58,7 @@ void NoteFileHandle::force_close() {
 NoteBytes::Object NoteFileHandle::read_object() {
     if (closed_.load()) return {};
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    auto svc = service_.lock();
+    auto svc = service_;
     if (!svc) return {};
     auto buf = svc->read_file_to_buffer(file_path_);
     if (buf.empty()) return {};
@@ -73,7 +73,7 @@ NoteBytes::Object NoteFileHandle::read_object() {
 bool NoteFileHandle::write_object(const NoteBytes::Object& obj) {
     if (closed_.load()) return false;
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    auto svc = service_.lock();
+    auto svc = service_;
     if (!svc) return false;
     return svc->write_buffer_to_file(file_path_, obj.serialize());
 }
@@ -81,7 +81,7 @@ bool NoteFileHandle::write_object(const NoteBytes::Object& obj) {
 std::vector<uint8_t> NoteFileHandle::read_bytes() {
     if (closed_.load()) return {};
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    auto svc = service_.lock();
+    auto svc = service_;
     if (!svc) return {};
     return svc->read_file_to_buffer(file_path_);
 }
@@ -89,7 +89,7 @@ std::vector<uint8_t> NoteFileHandle::read_bytes() {
 bool NoteFileHandle::write_bytes(const uint8_t* data, size_t length) {
     if (closed_.load()) return false;
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    auto svc = service_.lock();
+    auto svc = service_;
     if (!svc) return false;
     std::vector<uint8_t> buf(data, data + length);
     return svc->write_buffer_to_file(file_path_, buf);

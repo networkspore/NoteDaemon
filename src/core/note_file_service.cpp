@@ -389,7 +389,8 @@ std::shared_ptr<NoteFileHandle> NoteFileService::get_file(
     const std::string& cid,
     const std::vector<NoteBytes::Value>& path_segments)
 {
-    if (!initialized_.load() || !client_exists(cid)) return nullptr;
+    if (!initialized_.load()) return nullptr;
+    if (!client_exists(cid)) return nullptr;
 
     std::string ps;
     for (size_t i = 0; i < path_segments.size(); i++) {
@@ -413,7 +414,7 @@ std::shared_ptr<NoteFileHandle> NoteFileService::get_file(
 
     auto handle = std::make_shared<NoteFileHandle>(
         file_path, path_segments, fp, cid, std::vector<uint8_t>(),
-        shared_from_this());
+        this);
 
     { std::lock_guard<std::mutex> l(handles_mutex_); handles_[fp] = handle; }
     return handle;
@@ -492,11 +493,12 @@ std::unique_ptr<StreamSession> NoteFileService::open_stream(
     session->handle = handle;
     session->mode = mode;
 
+    std::string saved_id = session->stream_id;
     { std::lock_guard<std::mutex> l(streams_mutex_);
-      streams_[session->stream_id] = std::move(session); }
+      streams_[saved_id] = std::move(session); }
 
     std::lock_guard<std::mutex> l(streams_mutex_);
-    auto copy = std::make_unique<StreamSession>(*streams_[session->stream_id]);
+    auto copy = std::make_unique<StreamSession>(*streams_[saved_id]);
     return copy;
 }
 

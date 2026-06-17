@@ -1527,24 +1527,25 @@ private:
                       "Service not available");
             return;
         }
-        auto files = svc->list_client_files(std::string());
+        auto files = svc->list_clients();
         NoteBytes::Object response;
-        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_list"));
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("client_list"));
         NoteBytes::Array arr;
         for (const auto& f : files) {
             arr.add(NoteBytes::Value(f));
         }
-        response.add(NoteBytes::Value("files"), arr.as_value());
+        response.add(NoteBytes::Value("clients"), arr.as_value());
         write_to_fd(reply_fd, response);
     }
 
     void handle_note_file_get(int reply_fd, const NoteBytes::Object& msg,
                                pid_t client_pid) {
         (void)client_pid;
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
         auto* path_val = msg.get(NoteBytes::Value("path"));
-        if (!path_val) {
+        if (!cid || !path_val) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
-                      "Missing path");
+                      "Missing client_id or path");
             return;
         }
         auto* svc = get_file_service();
@@ -1553,7 +1554,7 @@ private:
                       "Service not available");
             return;
         }
-        // Parse path string into segments
+        std::string cid_str = cid->as_string();
         std::string path_str = path_val->as_string();
         std::vector<std::string> segments;
         size_t start = 0, end;
@@ -1565,7 +1566,7 @@ private:
         if (start < path_str.size())
             segments.push_back(path_str.substr(start));
 
-        auto handle = svc->get_file("", segments);
+        auto handle = svc->get_file(cid_str, segments);
         if (!handle) {
             send_error(reply_fd, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
                       "File not found: " + path_str);
@@ -1584,11 +1585,12 @@ private:
     void handle_note_file_put(int reply_fd, const NoteBytes::Object& msg,
                                pid_t client_pid) {
         (void)client_pid;
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
         auto* path_val = msg.get(NoteBytes::Value("path"));
         auto* data_val = msg.get(NoteBytes::Value("data"));
-        if (!path_val || !data_val) {
+        if (!cid || !path_val || !data_val) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
-                      "Missing path or data");
+                      "Missing client_id, path, or data");
             return;
         }
         auto* svc = get_file_service();
@@ -1597,6 +1599,7 @@ private:
                       "Service not available");
             return;
         }
+        std::string cid_str = cid->as_string();
         std::string path_str = path_val->as_string();
         std::vector<std::string> segments;
         size_t start = 0, end;
@@ -1608,7 +1611,7 @@ private:
         if (start < path_str.size())
             segments.push_back(path_str.substr(start));
 
-        auto handle = svc->get_file("", segments);
+        auto handle = svc->get_file(cid_str, segments);
         if (!handle) {
             send_error(reply_fd, NoteMessaging::ErrorCodes::DEVICE_NOT_FOUND,
                       "Cannot create file: " + path_str);
@@ -1637,11 +1640,12 @@ private:
     void handle_note_file_delete(int reply_fd, const NoteBytes::Object& msg,
                                   pid_t client_pid) {
         (void)client_pid;
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
         auto* path_val = msg.get(NoteBytes::Value("path"));
         auto* recurse_val = msg.get(NoteBytes::Value("recursive"));
-        if (!path_val) {
+        if (!cid || !path_val) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
-                      "Missing path");
+                      "Missing client_id or path");
             return;
         }
         auto* svc = get_file_service();
@@ -1650,6 +1654,7 @@ private:
                       "Service not available");
             return;
         }
+        std::string cid_str = cid->as_string();
         std::string path_str = path_val->as_string();
         std::vector<std::string> segments;
         size_t start = 0, end;
@@ -1665,7 +1670,7 @@ private:
         std::vector<NoteBytes::Value> nb_segments;
         for (const auto& s : segments) nb_segments.emplace_back(s);
 
-        if (!svc->delete_file("", nb_segments, recursive)) {
+        if (!svc->delete_file(cid_str, nb_segments, recursive)) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
                       "Failed to delete: " + path_str);
             return;
