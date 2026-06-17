@@ -309,6 +309,50 @@ std::string NoteFileService::resolve_or_create_path(
     return NoteFileLedger::find_or_create_path(np);
 }
 
+bool NoteFileService::ensure_ledger_entry(
+    const std::string& cid,
+    const std::vector<NoteBytes::Value>& path_segments,
+    const std::string& file_path)
+{
+    // After a WriteStream completes, the .dat file exists on disk.
+    // But if delete_file raced with the stream, the ledger entry is gone.
+    // Try to resolve — if the ledger returns a different path, re-add ours.
+    std::lock_guard<std::mutex> lock(get_ledger_lock(cid));
+    NoteFilePath np(client_ledger_path(cid), path_segments,
+                    client_data_dir(cid));
+    auto existing = NoteFileLedger::find_or_create_path(np);
+    if (existing != file_path) {
+        // Ledger points elsewhere (or doesn't exist) — restore ours
+        auto ledger = NoteFileLedger::read_ledger(client_ledger_path(cid));
+        NoteBytes::Object rebuilt;
+        bool found = false;
+        for (const auto& pair : ledger.pairs()) {
+            if (pair.key() == path_segments[0] &&
+                pair.value().type() == NoteBytes::Type::STRING) {
+                // Replace with our file_path
+                rebuilt.add(pair.key(), NoteBytes::Value(file_path));
+                found = true;
+            } else if (pair.key() == path_segments[0] &&
+                       pair.value().type() == NoteBytes::Type::OBJECT) {
+                // Nested path — would need recursive merge
+                // For now, just add at top level
+                rebuilt.add(pair);
+                found = true;
+            } else {
+                rebuilt.add(pair);
+            }
+        }
+        if (!found) {
+            // Ledger doesn't have this path at all — add it
+            rebuilt.add(path_segments[0], NoteBytes::Value(file_path));
+        }
+        NoteFileLedger::write_ledger(client_ledger_path(cid), rebuilt);
+        syslog(LOG_INFO, "[NoteFileService] Restored ledger entry for %s",
+               file_path.c_str());
+    }
+    return true;
+}
+
 std::vector<uint8_t> NoteFileService::read_file_to_buffer(
     const std::string& path)
 {
@@ -388,6 +432,28 @@ bool NoteFileService::delete_file(
     const std::vector<NoteBytes::Value>& path_segments,
     bool recursive)
 {
+    // Check for active handles — warn if file is in use
+    std::string ps;
+    for (size_t i = 0; i < path_segments.size(); i++) {
+        if (i > 0) ps += "/";
+        ps += path_segments[i].as_string();
+    }
+    std::string fp = cid + "/" + ps;
+    {
+        std::lock_guard<std::mutex> l(handles_mutex_);
+        auto it = handles_.find(fp);
+        if (it != handles_.end()) {
+            auto h = it->second.lock();
+            if (h && h->is_open()) {
+                syslog(LOG_WARNING,
+                       "[NoteFileService] Deleting %s while handle is open. "
+                       "In-progress reads continue (fd stays valid), "
+                       "but new opens after this will fail until stream completes.",
+                       fp.c_str());
+            }
+        }
+    }
+
     std::lock_guard<std::mutex> lock(get_ledger_lock(cid));
     NoteFilePath np(client_ledger_path(cid), path_segments,
                     client_data_dir(cid), recursive);
@@ -460,6 +526,10 @@ bool NoteFileService::route_channel(const std::string& sid,
         auto ws = s->handle->open_write_stream();
         if (!ws) return false;
         ws->receive_from(channel);
+
+        // After write completes, re-register path in case delete raced
+        ensure_ledger_entry(s->client_id, s->handle->path(),
+                            s->handle->file_path());
         return true;
     }
 }

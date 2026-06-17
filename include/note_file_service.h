@@ -140,6 +140,11 @@ public:
     std::string resolve_or_create_path(
         const std::string& client_id,
         const std::vector<NoteBytes::Value>& path_segments);
+
+    /** Ensure a file path exists in the ledger (for WriteStream recovery). */
+    bool ensure_ledger_entry(const std::string& client_id,
+                              const std::vector<NoteBytes::Value>& path_segments,
+                              const std::string& file_path);
     std::vector<uint8_t> read_file_to_buffer(const std::string& file_path);
     bool write_buffer_to_file(const std::string& file_path,
                                const std::vector<uint8_t>& data);
