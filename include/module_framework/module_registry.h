@@ -11,6 +11,9 @@
 #include "imodule.h"
 #include "error.h"
 
+// Forward declaration only — notebytes.h has heavy Boost dependencies.
+namespace NoteBytes { class Object; }
+
 namespace NoteDaemon {
 
 /**
@@ -96,6 +99,11 @@ public:
         }
     }
 
+    // ── Inter-module RPC ──────────────────────────────────────────────
+    /** Send a NoteBytes message to a named module and get a response. */
+    NoteBytes::Object send_to_module(const std::string& target_module,
+                                      const NoteBytes::Object& msg);
+
 private:
     std::unordered_map<std::string, IModule*> modules_;
 };
@@ -117,6 +125,10 @@ inline Error make_module_already_registered_error(const std::string& module_name
                             "Module already registered: " + module_name,
                             "module_registry");
 }
+
+// ── Global accessors (same pattern as get_file_service/set_file_service) ────
+ModuleRegistry* get_module_registry();
+void set_module_registry(ModuleRegistry* registry);
 
 } // namespace NoteDaemon
 

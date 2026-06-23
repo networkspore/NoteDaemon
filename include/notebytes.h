@@ -422,6 +422,14 @@ namespace NoteBytes {
             return default_valkey.as_string();
         }
 
+        // Iterate all key-value pairs (added for query_files support)
+        template <typename F>
+        void for_each(F&& callback) const {
+            for (const auto& pair : pairs_) {
+                callback(pair.key(), pair.value());
+            }
+        }
+
         
         int32_t get_int(std::string_view key, int32_t default_val = 0) const {
             if (const Value* val = get(key)) {

@@ -311,6 +311,7 @@ public:
             NoteFileConfig file_config;
             file_config.data_directory = paths_.root + "/data";
             file_config.admin_key_path = paths_.root + "/admin.key";
+            file_config.storage_backend = config_.get_string("storage.backend", "flat");
             
             file_service_ = std::make_unique<NoteFileService>(file_config);
             if (file_service_->init()) {
@@ -669,6 +670,9 @@ private:
                 syslog(LOG_INFO, "Module %s started", name.c_str());
             }
         }
+
+        // Expose the module registry globally for inter-module RPC
+        set_module_registry(&module_registry_);
 
         auto routes = routing_registry_.get_all_routes();
         syslog(LOG_INFO, "Module capability registry: %zu advertised message type(s) "
@@ -1187,6 +1191,10 @@ private:
     handle_close_stream(reply_fd, msg, client_pid);
     return;
   }
+  if (msg_type == "query_files") {
+    handle_note_file_query_files(reply_fd, msg, client_pid);
+    return;
+  }
 
         // Unknown core message
         syslog(LOG_WARNING,
@@ -1520,22 +1528,61 @@ private:
 
     void handle_note_file_query_files(int reply_fd, const NoteBytes::Object& msg,
                                        pid_t client_pid) {
-        (void)msg; (void)client_pid;
+        (void)client_pid;
+        try {
         auto* svc = get_file_service();
         if (!svc) {
             send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
                       "Service not available");
             return;
         }
-        auto files = svc->list_clients();
-        NoteBytes::Object response;
-        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("client_list"));
-        NoteBytes::Array arr;
-        for (const auto& f : files) {
-            arr.add(NoteBytes::Value(f));
+
+        // Parse request
+        auto* cid = msg.get(NoteBytes::Value("client_id"));
+        if (!cid) {
+            send_error(reply_fd, NoteDaemon::ErrorCodes::INVALID_MESSAGE,
+                      "Missing client_id");
+            return;
         }
-        response.add(NoteBytes::Value("clients"), arr.as_value());
+        std::string client_id = cid->as_string();
+        std::string prefix = "";
+        auto* prefix_val = msg.get(NoteBytes::Value("prefix"));
+        if (prefix_val) prefix = prefix_val->as_string();
+
+        // Parse match conditions (flat key-value pairs)
+        std::vector<NoteFileService::FileQueryMatch> matches;
+        auto* match_val = msg.get(NoteBytes::Value("match"));
+        if (match_val) {
+            auto raw = match_val->data();
+            if (!raw.empty()) {
+                auto match_obj = NoteBytes::Object::deserialize(raw.data(), raw.size());
+                match_obj.for_each([&](const NoteBytes::Value& key, const NoteBytes::Value& val) {
+                    matches.push_back({key.as_string(), val.as_string()});
+                });
+            }
+        }
+
+        // Execute query
+        auto results = svc->query_client_files(client_id, prefix, matches);
+
+        // Build response
+        NoteBytes::Object response;
+        response.add(NoteMessaging::Keys::EVENT, NoteBytes::Value("file_list"));
+        response.add(NoteMessaging::Keys::STATUS, NoteMessaging::Status::OK);
+        NoteBytes::Array files_arr;
+        for (const auto& r : results) {
+            NoteBytes::Object entry;
+            entry.add(NoteBytes::Value("path"), NoteBytes::Value(r.logical_path));
+            files_arr.add(entry.as_value());
+        }
+        response.add(NoteBytes::Value("files"), files_arr.as_value());
         write_to_fd(reply_fd, response);
+        } catch (const std::exception& e) {
+            syslog(LOG_ERR,
+                "[query_files] handler error: %s", e.what());
+            send_error(reply_fd, NoteDaemon::ErrorCodes::UNKNOWN,
+                      "query_files error: " + std::string(e.what()));
+        }
     }
 
     void handle_note_file_get(int reply_fd, const NoteBytes::Object& msg,

@@ -72,6 +72,7 @@ endif()
 
 # Link libraries
 target_link_libraries(note-daemon PRIVATE
+    python3.12
     OpenSSL::SSL
     OpenSSL::Crypto
     pthread
@@ -80,7 +81,8 @@ target_link_libraries(note-daemon PRIVATE
 )
 
 if(WITH_LIBUSB)
-    target_link_libraries(note-daemon PRIVATE ${LIBUSB_LIBRARIES})
+    target_link_libraries(note-daemon PRIVATE
+    python3.12 ${LIBUSB_LIBRARIES})
 endif()
 
 # Export all symbols so dynamically loaded modules can access them
@@ -116,14 +118,17 @@ if(WITH_LIBUSB)
 endif()
 message(STATUS "OpenSSL Version: ${OPENSSL_VERSION}")
 
-# ── WebRTC support (libdatachannel) ──────────────────────────────────────
+# ── WebRTC support (libdatachannel, auto-detect) ─────────────────────────
 if(WITH_WEBRTC)
+  # Try system-installed libdatachannel first
   find_package(LibDataChannel QUIET)
   if(LibDataChannel_FOUND)
-    target_link_libraries(note-daemon PRIVATE LibDataChannel::LibDataChannel)
+    target_link_libraries(note-daemon PRIVATE
+    python3.12 LibDataChannel::LibDataChannel)
     target_compile_definitions(note-daemon PRIVATE WITH_WEBRTC)
     message(STATUS "WebRTC: enabled (system libdatachannel)")
   else()
+    # Try FetchContent with submodule support
     include(FetchContent)
     FetchContent_Declare(
       datachannel
@@ -138,7 +143,8 @@ if(WITH_WEBRTC)
     set(NO_TESTS ON CACHE BOOL "" FORCE)
     set(WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(datachannel)
-    target_link_libraries(note-daemon PRIVATE datachannel)
+    target_link_libraries(note-daemon PRIVATE
+    python3.12 datachannel)
     target_compile_definitions(note-daemon PRIVATE WITH_WEBRTC)
     message(STATUS "WebRTC: enabled (FetchContent libdatachannel v0.21.0)")
   endif()

@@ -287,6 +287,17 @@ std::mutex& NoteFileService::get_ledger_lock(const std::string& cid) const {
 // File paths & I/O
 // ══════════════════════════════════════════════════════════════════════════
 
+std::string NoteFileService::segments_to_file_path(
+    const std::string& cid,
+    const std::vector<NoteBytes::Value>& path_segments) const
+{
+    std::string path = client_data_dir(cid);
+    for (const auto& seg : path_segments) {
+        path += "/" + seg.as_string();
+    }
+    return path;
+}
+
 std::string NoteFileService::generate_data_file_path(const std::string& cid) const {
     auto u = rand_bytes(16);
     std::stringstream ss;
@@ -303,6 +314,14 @@ std::string NoteFileService::resolve_or_create_path(
     const std::string& cid,
     const std::vector<NoteBytes::Value>& path_segments)
 {
+    if (config_.storage_backend == "flat") {
+        // Flat mode: logical path IS the file path
+        std::string fp = segments_to_file_path(cid, path_segments);
+        // Ensure parent directory exists
+        fs::create_directories(fs::path(fp).parent_path());
+        return fp;
+    }
+    // Ledger mode: resolve or create via ledger
     std::lock_guard<std::mutex> lock(get_ledger_lock(cid));
     NoteFilePath np(client_ledger_path(cid), path_segments,
                     client_data_dir(cid));
@@ -314,9 +333,11 @@ bool NoteFileService::ensure_ledger_entry(
     const std::vector<NoteBytes::Value>& path_segments,
     const std::string& file_path)
 {
-    // After a WriteStream completes, the .dat file exists on disk.
-    // But if delete_file raced with the stream, the ledger entry is gone.
-    // Try to resolve — if the ledger returns a different path, re-add ours.
+    if (config_.storage_backend == "flat") {
+        // Flat mode: no ledger to ensure — file already on disk
+        return true;
+    }
+    // Ledger mode: restore entry if delete raced with stream
     std::lock_guard<std::mutex> lock(get_ledger_lock(cid));
     NoteFilePath np(client_ledger_path(cid), path_segments,
                     client_data_dir(cid));
@@ -329,13 +350,10 @@ bool NoteFileService::ensure_ledger_entry(
         for (const auto& pair : ledger.pairs()) {
             if (pair.key() == path_segments[0] &&
                 pair.value().type() == NoteBytes::Type::STRING) {
-                // Replace with our file_path
                 rebuilt.add(pair.key(), NoteBytes::Value(file_path));
                 found = true;
             } else if (pair.key() == path_segments[0] &&
                        pair.value().type() == NoteBytes::Type::OBJECT) {
-                // Nested path — would need recursive merge
-                // For now, just add at top level
                 rebuilt.add(pair);
                 found = true;
             } else {
@@ -343,7 +361,6 @@ bool NoteFileService::ensure_ledger_entry(
             }
         }
         if (!found) {
-            // Ledger doesn't have this path at all — add it
             rebuilt.add(path_segments[0], NoteBytes::Value(file_path));
         }
         NoteFileLedger::write_ledger(client_ledger_path(cid), rebuilt);
@@ -455,6 +472,11 @@ bool NoteFileService::delete_file(
         }
     }
 
+    if (config_.storage_backend == "flat") {
+        // Flat mode: delete the file directly
+        return fs::remove(segments_to_file_path(cid, path_segments));
+    }
+    // Ledger mode: remove from ledger
     std::lock_guard<std::mutex> lock(get_ledger_lock(cid));
     NoteFilePath np(client_ledger_path(cid), path_segments,
                     client_data_dir(cid), recursive);
@@ -467,12 +489,179 @@ std::vector<std::string> NoteFileService::list_client_files(
     std::vector<std::string> result;
     auto dir = client_data_dir(cid);
     if (!fs::is_directory(dir)) return result;
+
+    if (config_.storage_backend == "flat") {
+        // Flat mode: list all regular files, return logical (relative) paths
+        for (auto& p : fs::recursive_directory_iterator(dir)) {
+            if (p.is_regular_file()) {
+                // Skip auth/dotfiles
+                std::string fn = p.path().filename().string();
+                if (fn.size() > 0 && fn[0] == '.') continue;
+                result.push_back(fs::relative(p.path(), dir).string());
+            }
+        }
+        return result;
+    }
+
+    // Ledger mode: list .dat files
     for (auto& p : fs::recursive_directory_iterator(dir)) {
         if (p.is_regular_file() &&
             p.path().extension() == ".dat")
             result.push_back(p.path().string());
     }
     return result;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Query (ledger-walk + optional content filter)
+// ══════════════════════════════════════════════════════════════════════════
+
+std::vector<NoteFileService::FileQueryResult> NoteFileService::query_client_files(
+    const std::string& cid,
+    const std::string& prefix,
+    const std::vector<FileQueryMatch>& matches)
+{
+    std::vector<FileQueryResult> results;
+    auto dir = client_data_dir(cid);
+    if (!fs::is_directory(dir)) return results;
+
+    if (config_.storage_backend == "flat") {
+        // ── Flat mode: walk filesystem ─────────────────────────────────
+        try {
+            for (auto& p : fs::recursive_directory_iterator(dir)) {
+                if (!p.is_regular_file()) continue;
+                std::string fn = p.path().filename().string();
+                if (fn.size() > 0 && fn[0] == '.') continue; // skip dotfiles
+
+                std::string logical = fs::relative(p.path(), dir).string();
+                // Prefix filter
+                if (!prefix.empty() && logical.compare(0, prefix.size(), prefix) != 0)
+                    continue;
+
+                if (matches.empty()) {
+                    results.push_back({logical, p.path().string()});
+                } else {
+                    // Content match: read file, validate, deserialize, check fields
+                    auto buf = read_file_to_buffer(p.path().string());
+                    if (!buf.empty()) {
+                        size_t off = 0;
+                        bool valid = true;
+                        while (off < buf.size() && valid) {
+                            if (off + 5 > buf.size()) { valid = false; break; }
+                            uint8_t vt = buf[off];
+                            if (vt > 13) { valid = false; break; }
+                            uint32_t vlen = (buf[off+1] << 24) | (buf[off+2] << 16) |
+                                            (buf[off+3] << 8) | buf[off+4];
+                            if (off + 5 + vlen > buf.size()) { valid = false; break; }
+                            off += 5 + vlen;
+                        }
+                        if (valid) {
+                            try {
+                                auto file_obj = NoteBytes::Object::deserialize(
+                                    buf.data(), buf.size());
+                                bool all_match = true;
+                                for (const auto& m : matches) {
+                                    std::string v = file_obj.get_string(
+                                        std::string_view(m.field),
+                                        std::string_view(""));
+                                    if (v != m.value) { all_match = false; break; }
+                                }
+                                if (all_match)
+                                    results.push_back({logical, p.path().string()});
+                            } catch (const std::exception& e) {
+                                syslog(LOG_WARNING,
+                                    "[query_files] parse error %s: %s",
+                                    logical.c_str(), e.what());
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            syslog(LOG_ERR, "[query_files] flat walk error: %s", e.what());
+        }
+        return results;
+    }
+
+    // ── Ledger mode: walk ledger tree ──────────────────────────────────
+    try {
+    auto ledger_path = client_ledger_path(cid);
+    struct stat st;
+    if (stat(ledger_path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+        return results;
+    auto ledger = NoteFileLedger::read_ledger(ledger_path);
+    if (ledger.size() == 0) return results;
+
+    const size_t MAX_DEPTH = 32;
+    std::function<void(const NoteBytes::Object&, std::string&, size_t)> walk;
+    walk = [&](const NoteBytes::Object& obj, std::string& path_sofar, size_t depth) {
+        if (depth > MAX_DEPTH) return;
+        for (const auto& p : obj.pairs()) {
+            const auto& key = p.key();
+            const auto& val = p.value();
+            if (key == NoteFileConstants::FILE_PATH) {
+                if (val.type() == NoteBytes::Type::STRING) {
+                    std::string logical = path_sofar;
+                    if (!logical.empty() && logical[0] == '/') logical = logical.substr(1);
+                    if (!prefix.empty() && logical.compare(0, prefix.size(), prefix) != 0)
+                        continue;
+                    std::string fp = val.as_string();
+                    if (matches.empty()) {
+                        results.push_back({logical, fp});
+                    } else {
+                        auto buf = read_file_to_buffer(fp);
+                        if (!buf.empty()) {
+                            size_t off = 0;
+                            bool valid = true;
+                            while (off < buf.size() && valid) {
+                                if (off + 5 > buf.size()) { valid = false; break; }
+                                uint8_t vt = buf[off];
+                                if (vt > 13) { valid = false; break; }
+                                uint32_t vlen = (buf[off+1] << 24) | (buf[off+2] << 16) |
+                                                (buf[off+3] << 8) | buf[off+4];
+                                if (off + 5 + vlen > buf.size()) { valid = false; break; }
+                                off += 5 + vlen;
+                            }
+                            if (valid) {
+                                try {
+                                    auto file_obj = NoteBytes::Object::deserialize(
+                                        buf.data(), buf.size());
+                                    bool all_match = true;
+                                    for (const auto& m : matches) {
+                                        std::string v = file_obj.get_string(
+                                            std::string_view(m.field),
+                                            std::string_view(""));
+                                        if (v != m.value) { all_match = false; break; }
+                                    }
+                                    if (all_match)
+                                        results.push_back({logical, fp});
+                                } catch (const std::exception& e) {
+                                    syslog(LOG_WARNING,
+                                        "[query_files] parse error %s: %s",
+                                        logical.c_str(), e.what());
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            if (val.type() == NoteBytes::Type::OBJECT) {
+                auto nested = NoteBytes::as_object(val);
+                size_t prev_len = path_sofar.size();
+                if (!path_sofar.empty()) path_sofar += "/";
+                path_sofar += key.as_string();
+                walk(nested, path_sofar, depth + 1);
+                path_sofar.resize(prev_len);
+            }
+        }
+    };
+        std::string root_path;
+        walk(ledger, root_path, 0);
+    } catch (const std::exception& e) {
+        syslog(LOG_ERR, "[query_files] ledger walk error: %s", e.what());
+    }
+    return results;
 }
 
 // ══════════════════════════════════════════════════════════════════════════

@@ -126,7 +126,7 @@ private:
 
 struct WebRTCChannelImpl; // Opaque — defined in channel.cpp
 
-class WebRTCChannel : public Channel {
+class WebRTCChannel : public Channel, public std::enable_shared_from_this<WebRTCChannel> {
 public:
   // Factory: create a WebRTC channel from a data channel pointer.
   // dc_ptr is a pointer to rtc::DataChannel. Returns nullptr if

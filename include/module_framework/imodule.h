@@ -18,9 +18,14 @@
 #include "device_ownership_registry.h"
 #include "json.hpp" // nlohmann/json
 
+// Forward declarations for core services injected into modules.
+// NoteFileService is in global namespace (not NoteDaemon).
+class NoteFileService;
+
 namespace NoteDaemon {
 
 class HandlerRegistry;
+class WebRTCManager;    // defined in module_framework/webrtc_manager.h
 
 class IModule {
 public:
@@ -36,6 +41,8 @@ public:
 
   virtual Error init(const nlohmann::json& config) = 0;
   virtual void set_ownership_registry(DeviceOwnershipRegistry* /*registry*/) {}
+  virtual void set_file_service(::NoteFileService* /*svc*/) {}
+  virtual void set_webrtc_manager(WebRTCManager* /*mgr*/) {}
   virtual Error start() = 0;
   virtual Error stop() = 0;
   virtual void shutdown() = 0;

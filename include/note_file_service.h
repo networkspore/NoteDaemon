@@ -77,6 +77,7 @@ struct ClientToken {
 struct NoteFileConfig {
     std::string data_directory;       // /var/netnotes/data
     std::string admin_key_path;       // /etc/netnotes/admin.key
+    std::string storage_backend = "flat";  // "flat" or "ledger"
 };
 
 // ── NoteFileService ──────────────────────────────────────────────────────
@@ -126,6 +127,20 @@ public:
 
     std::vector<std::string> list_client_files(const std::string& client_id);
 
+    // ── Query / Filtered listing ───────────────────────────────────────
+    struct FileQueryMatch {
+        std::string field;
+        std::string value;
+    };
+    struct FileQueryResult {
+        std::string logical_path;
+        std::string file_path;
+    };
+    std::vector<FileQueryResult> query_client_files(
+        const std::string& client_id,
+        const std::string& prefix,
+        const std::vector<FileQueryMatch>& matches);
+
     // ── Stream management ──────────────────────────────────────────────
     std::unique_ptr<StreamSession> open_stream(
         const std::string& client_id,
@@ -137,6 +152,11 @@ public:
                        NoteDaemon::Channel* channel);
 
     // ── Internal ───────────────────────────────────────────────────────
+    /** Build absolute filesystem path from client_id + logical segments. */
+    std::string segments_to_file_path(
+        const std::string& client_id,
+        const std::vector<NoteBytes::Value>& path_segments) const;
+
     std::string resolve_or_create_path(
         const std::string& client_id,
         const std::vector<NoteBytes::Value>& path_segments);
